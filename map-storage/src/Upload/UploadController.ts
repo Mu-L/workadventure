@@ -5,23 +5,30 @@ import { Express, Request } from "express";
 import multer from "multer";
 import pLimit from "p-limit";
 import archiver from "archiver";
-import StreamZip from "node-stream-zip";
+import StreamZip, { ZipEntry } from "node-stream-zip";
 import * as jsonpatch from "fast-json-patch";
 import { MapValidator, OrganizedErrors } from "@workadventure/map-editor/src/GameMap/MapValidator";
 import { WAMFileFormat } from "@workadventure/map-editor";
 import { ZipFileFetcher } from "@workadventure/map-editor/src/GameMap/Validator/ZipFileFetcher";
 import { HttpFileFetcher } from "@workadventure/map-editor/src/GameMap/Validator/HttpFileFetcher";
+import { wamFileMigration } from "@workadventure/map-editor/src/Migrations/WamFileMigration";
 import { Operation } from "fast-json-patch";
 import { generateErrorMessage } from "zod-error";
 import * as Sentry from "@sentry/node";
 import bodyParser from "body-parser";
+import { ITiledMap } from "@workadventure/tiled-map-type-guard";
+import axios from "axios";
 import { mapPath } from "../Services/PathMapper";
-import { MAX_UNCOMPRESSED_SIZE } from "../Enum/EnvironmentVariable";
+import { ENTITY_COLLECTION_URLS, MAX_UNCOMPRESSED_SIZE, WAM_TEMPLATE_URL } from "../Enum/EnvironmentVariable";
 import { passportAuthenticator } from "../Services/Authentication";
 import { uploadDetector } from "../Services/UploadDetector";
 import { MapListService } from "../Services/MapListService";
+import { mapsManager } from "../MapsManager";
+import { _axios } from "../Services/axiosInstance";
 import { FileSystemInterface } from "./FileSystemInterface";
 import { FileNotFoundError } from "./FileNotFoundError";
+
+const limit = pLimit(10);
 
 const upload = multer({
     storage: multer.diskStorage({}),
@@ -76,7 +83,7 @@ export class UploadController {
                 const directory = Body.parse(req.body).directory || "";
 
                 if (directory.includes("..")) {
-                    // Attempt to override filesystem. That' a hack!
+                    // Attempt to override filesystem. That's a hack!
                     res.status(400).send("Invalid directory");
                     return;
                 }
@@ -193,7 +200,7 @@ export class UploadController {
                         promises.push(this.fileSystem.writeFile(zipEntry, key, zip));
                         if (path.extname(key) === ".tmj") {
                             if (!wamFilesNames.includes(path.parse(zipEntry.name).name)) {
-                                promises.push(this.createWAMFileIfMissing(key));
+                                promises.push(this.createWAMFileIfMissing(key, zipEntry, zip));
                             }
                         } else if (path.extname(key) === ".wam") {
                             const wamUrl = `${req.protocol}://${req.hostname}${directory}/${zipEntry.name}`;
@@ -410,7 +417,7 @@ export class UploadController {
                     let errors: Partial<OrganizedErrors> = {};
 
                     const content = WAMFileFormat.parse(
-                        JSON.parse(await this.fileSystem.readFileAsString(virtualPath))
+                        wamFileMigration.migrate(JSON.parse(await this.fileSystem.readFileAsString(virtualPath)))
                     );
 
                     // Let's make things easy: if "vendor" or "metadata" is not defined, let's add an empty object.
@@ -468,27 +475,83 @@ export class UploadController {
         });
     }
 
-    private async createWAMFileIfMissing(tmjKey: string): Promise<void> {
+    private async createWAMFileIfMissing(
+        tmjKey: string,
+        zipEntry: ZipEntry,
+        zip: StreamZip.StreamZipAsync
+    ): Promise<void> {
         const wamPath = tmjKey.slice().replace(".tmj", ".wam");
         if (!(await this.fileSystem.exist(wamPath))) {
+            const tmjString = (await zip.entryData(zipEntry)).toString();
+            // Using "as" instead of Zod because the Zod check was alreadz performed before.
+            const tmjContent = JSON.parse(tmjString) as ITiledMap;
             await this.fileSystem.writeStringAsFile(
                 wamPath,
-                JSON.stringify(this.getFreshWAMFileContent(`./${path.basename(tmjKey)}`), null, 4)
+                JSON.stringify(await this.getFreshWAMFileContent(`./${path.basename(tmjKey)}`, tmjContent), null, 4)
             );
         }
     }
 
-    private getFreshWAMFileContent(tmjFilePath: string): WAMFileFormat {
-        return {
-            version: "1.0.0",
-            mapUrl: tmjFilePath,
-            areas: [],
-            entities: {},
-            entityCollections: [],
-            settings: undefined,
-        };
-    }
+    private async getFreshWAMFileContent(tmjFilePath: string, tmjContent: ITiledMap): Promise<WAMFileFormat> {
+        const nameProperty = tmjContent.properties?.find((property) => property.name === "mapName");
+        let name: string | undefined;
+        if (nameProperty?.type === "string") {
+            name = nameProperty.value;
+        }
 
+        const descriptionProperty = tmjContent.properties?.find((property) => property.name === "mapDescription");
+        let description: string | undefined;
+        if (descriptionProperty?.type === "string") {
+            description = descriptionProperty.value;
+        }
+
+        const thumbnailProperty = tmjContent.properties?.find((property) => property.name === "mapImage");
+        let thumbnail: string | undefined;
+        if (thumbnailProperty?.type === "string") {
+            thumbnail = thumbnailProperty.value;
+        }
+
+        const copyrightProperty = tmjContent.properties?.find((property) => property.name === "mapCopyright");
+        let copyright: string | undefined;
+        if (copyrightProperty?.type === "string") {
+            copyright = copyrightProperty.value;
+        }
+
+        let wamFile: WAMFileFormat | undefined;
+
+        if (WAM_TEMPLATE_URL) {
+            const response = await axios.get(WAM_TEMPLATE_URL);
+            wamFile = WAMFileFormat.parse(wamFileMigration.migrate(response.data));
+            wamFile.mapUrl = tmjFilePath;
+            wamFile.metadata = {
+                ...wamFile.metadata,
+                name,
+                description,
+                thumbnail,
+                copyright,
+            };
+        } else {
+            const urls = ENTITY_COLLECTION_URLS?.split(",").filter((url) => url != "") ?? [];
+            wamFile = {
+                version: wamFileMigration.getLatestVersion(),
+                mapUrl: tmjFilePath,
+                areas: [],
+                entities: {},
+                entityCollections: urls.map((url) => ({
+                    url,
+                    type: "file",
+                })),
+                settings: undefined,
+                metadata: {
+                    name,
+                    description,
+                    thumbnail,
+                    copyright,
+                },
+            };
+        }
+        return wamFile;
+    }
     /**
      * Let's filter out any file starting with "."
      */
@@ -580,9 +643,37 @@ export class UploadController {
 
                 const virtualPath = mapPath(filePath, req);
 
+                const isWamFile = filePath.endsWith(".wam");
+
+                if (isWamFile) {
+                    const gameMap = await mapsManager.getOrLoadGameMap(virtualPath);
+                    const areas = gameMap.getGameMapAreas()?.getAreas().values();
+
+                    if (areas) {
+                        const promises = Array.from(areas).reduce((acc, currArea) => {
+                            currArea.properties.forEach((property) => {
+                                const resourceUrl = property.resourceUrl;
+                                if (resourceUrl) {
+                                    acc.push(limit(() => _axios.delete(resourceUrl, { data: property })));
+                                }
+                            });
+                            return acc;
+                        }, [] as Promise<unknown>[]);
+
+                        try {
+                            await Promise.all(promises);
+                        } catch (error) {
+                            console.error("Failed to execute all request on resourceUrl", error);
+                            Sentry.captureMessage(
+                                `Failed to execute all request on resourceUrl ${JSON.stringify(error)}`
+                            );
+                        }
+                    }
+                }
+
                 await this.fileSystem.deleteFiles(virtualPath);
 
-                if (filePath.endsWith(".wam")) {
+                if (isWamFile) {
                     // FIXME: We should call the refresh for all WAM files deleted (in subdirectories too)
                     uploadDetector.refresh(this.getFullUrlFromRequest(req)).catch((err) => {
                         console.error(err);
@@ -733,7 +824,7 @@ export class UploadController {
                         // No cache file or invalid cache file? What the hell? Let's try to regenerate the cache file
                         await this.mapListService.generateCacheFile(req.hostname);
                         // Now that the cache file is generated, let's retry serving the file.
-                        const parsedCacheFile = this.mapListService.readCacheFile(req.hostname);
+                        const parsedCacheFile = await this.mapListService.readCacheFile(req.hostname);
                         res.json(parsedCacheFile);
                         return;
                     }

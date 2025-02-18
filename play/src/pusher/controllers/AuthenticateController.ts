@@ -1,21 +1,64 @@
+import fs from "fs";
 import { v4 } from "uuid";
-import { RegisterData, MeResponse, MeRequest } from "@workadventure/messages";
+import { MeRequest, MeResponse, RegisterData } from "@workadventure/messages";
 import { z } from "zod";
 import * as Sentry from "@sentry/node";
 import { JsonWebTokenError } from "jsonwebtoken";
+import Mustache from "mustache";
+import type { Server } from "hyper-express";
 import { AuthTokenData, jwtTokenManager } from "../services/JWTTokenManager";
 import { openIDClient } from "../services/OpenIDClient";
-import { DISABLE_ANONYMOUS, FRONT_URL } from "../enums/EnvironmentVariable";
+import { DISABLE_ANONYMOUS, FRONT_URL, MATRIX_PUBLIC_URI, PUSHER_URL } from "../enums/EnvironmentVariable";
 import { adminService } from "../services/AdminService";
 import { validateQuery } from "../services/QueryValidator";
 import { VerifyDomainService } from "../services/verifyDomain/VerifyDomainService";
+import { matrixProvider } from "../services/MatrixProvider";
 import { BaseHttpController } from "./BaseHttpController";
 
 export class AuthenticateController extends BaseHttpController {
+    private readonly redirectToMatrixFile: string;
+    private readonly redirectToPlayFile: string;
+    constructor(app: Server) {
+        super(app);
+
+        let redirectToMatrixPath: string;
+        if (fs.existsSync("dist/public/redirectToMatrix.html")) {
+            // In prod mode
+            redirectToMatrixPath = "dist/public/redirectToMatrix.html";
+        } else if (fs.existsSync("redirectToMatrix.html")) {
+            // In dev mode
+            redirectToMatrixPath = "redirectToMatrix.html";
+        } else {
+            throw new Error("Could not find redirectToMatrix.html file");
+        }
+
+        this.redirectToMatrixFile = fs.readFileSync(redirectToMatrixPath, "utf8");
+
+        // Pre-parse the file for speed (and validation)
+        Mustache.parse(this.redirectToMatrixFile);
+
+        let redirectToPlayPath: string;
+        if (fs.existsSync("dist/public/redirectToPlay.html")) {
+            // In prod mode
+            redirectToPlayPath = "dist/public/redirectToPlay.html";
+        } else if (fs.existsSync("redirectToPlay.html")) {
+            // In dev mode
+            redirectToPlayPath = "redirectToPlay.html";
+        } else {
+            throw new Error("Could not find redirectToPlay.html file");
+        }
+
+        this.redirectToPlayFile = fs.readFileSync(redirectToPlayPath, "utf8");
+
+        // Pre-parse the file for speed (and validation)
+        Mustache.parse(this.redirectToPlayFile);
+    }
+
     routes(): void {
         this.openIDLogin();
         this.me();
         this.openIDCallback();
+        this.matrixCallback();
         this.logoutCallback();
         this.register();
         this.anonymLogin();
@@ -45,11 +88,6 @@ export class AuthenticateController extends BaseHttpController {
          *        description: "todo"
          *        required: false
          *        type: "string"
-         *      - name: "redirect"
-         *        in: "query"
-         *        description: "todo"
-         *        required: false
-         *        type: "string"
          *     responses:
          *       302:
          *         description: Redirects the user to the OpenID login screen
@@ -62,7 +100,7 @@ export class AuthenticateController extends BaseHttpController {
                 res,
                 z.object({
                     playUri: z.string(),
-                    redirect: z.string().optional(),
+                    manuallyTriggered: z.literal("true").optional(),
                 })
             );
             if (query === undefined) {
@@ -80,7 +118,7 @@ export class AuthenticateController extends BaseHttpController {
                 return;
             }
 
-            const loginUri = await openIDClient.authorizationUrl(res, query.redirect, query.playUri, req);
+            const loginUri = await openIDClient.authorizationUrl(res, query.playUri, req, query.manuallyTriggered);
             res.atomic(() => {
                 res.cookie("playUri", query.playUri, undefined, {
                     httpOnly: true, // dont let browser javascript access cookie ever
@@ -135,7 +173,7 @@ export class AuthenticateController extends BaseHttpController {
             if (query === undefined) {
                 return;
             }
-            const { token, playUri, localStorageCompanionTextureId } = query;
+            const { token, playUri, localStorageCompanionTextureId, chatID } = query;
             let localStorageCharacterTextureIds = query["localStorageCharacterTextureIds[]"];
             if (typeof localStorageCharacterTextureIds === "string") {
                 localStorageCharacterTextureIds = [localStorageCharacterTextureIds];
@@ -152,7 +190,9 @@ export class AuthenticateController extends BaseHttpController {
                     IPAddress,
                     localStorageCharacterTextureIds ?? [],
                     localStorageCompanionTextureId,
-                    req.header("accept-language")
+                    req.header("accept-language"),
+                    authTokenData.tags,
+                    chatID
                 );
 
                 if (resUserData.status === "error") {
@@ -172,6 +212,8 @@ export class AuthenticateController extends BaseHttpController {
                             locale: authTokenData?.locale,
                             // TODO: replace ... with each property
                             ...resUserData,
+                            matrixUserId: authTokenData?.matrixUserId,
+                            matrixServerUrl: MATRIX_PUBLIC_URI,
                         } satisfies MeResponse);
                     });
                     return;
@@ -184,6 +226,8 @@ export class AuthenticateController extends BaseHttpController {
                             username: authTokenData?.username,
                             authToken: token,
                             locale: authTokenData?.locale,
+                            matrixUserId: authTokenData?.matrixUserId,
+                            matrixServerUrl: (resCheckTokenAuth.matrix_url as string | undefined) ?? MATRIX_PUBLIC_URI,
                             // TODO: replace ... with each property
                             ...resUserData,
                             ...resCheckTokenAuth,
@@ -249,7 +293,7 @@ export class AuthenticateController extends BaseHttpController {
 
             let userInfo = null;
             try {
-                userInfo = await openIDClient.getUserInfo(req, res);
+                userInfo = await openIDClient.getUserInfo(req, res, playUri);
             } catch (err) {
                 //if no access on openid provider, return error
                 Sentry.captureException("An error occurred while connecting to OpenID Provider => " + err);
@@ -268,13 +312,84 @@ export class AuthenticateController extends BaseHttpController {
                 email,
                 userInfo?.access_token,
                 userInfo?.username,
-                userInfo?.locale
+                userInfo?.locale,
+                userInfo?.tags,
+                email ? matrixProvider.getBareMatrixIdFromEmail(email) : undefined
             );
+
+            const matrixPublicUri = userInfo.matrix_url ?? MATRIX_PUBLIC_URI;
+
+            // If Matrix is configured, we need to get an access token for the Synapse server
+            if (matrixPublicUri) {
+                // TODO: check Matrix server login parameters to be sure we can connect
+
+                const matrixCallbackUrl = new URL("/matrix-callback", PUSHER_URL).toString();
+                let redirectPath = "/_matrix/client/v3/login/sso/redirect";
+                if (userInfo.matrix_identity_provider) {
+                    redirectPath += "/" + userInfo.matrix_identity_provider;
+                }
+                const matrixRedirectUrl = new URL(redirectPath, matrixPublicUri);
+                matrixRedirectUrl.searchParams.append("redirectUrl", matrixCallbackUrl);
+
+                // Note: the authToken cannot be saved in a cookie because sometimes, it can be pretty large (>4kB)
+                // Therefore, we use localStorage to store it. So we need to render an HTML page with a script that will
+                // save the token in localStorage
+                const html = Mustache.render(this.redirectToMatrixFile, {
+                    authToken,
+                    matrixRedirectUrl: matrixRedirectUrl.toString(),
+                });
+
+                res.type("html").send(html);
+
+                return;
+            }
 
             res.atomic(() => {
                 res.clearCookie("playUri");
                 // FIXME: possibly redirect to Admin instead.
                 res.redirect(playUri + "?token=" + encodeURIComponent(authToken));
+            });
+            return;
+        });
+    }
+
+    private matrixCallback(): void {
+        /**
+         * @openapi
+         * /matrix-callback:
+         *   get:
+         *     description: This endpoint is meant to be called by the Matrix server (Synapse) after the OpenID provider connected to Synapse handles a login attempt. Synapse redirects the browser to this endpoint.
+         *     parameters:
+         *      - name: "loginToken"
+         *        in: "query"
+         *        description: "A unique token that can be exchanged for a Matrix authentication token"
+         *        required: true
+         *        type: "string"
+         *     responses:
+         *       302:
+         *         description: Redirects to play once authentication is done.
+         */
+        this.app.get("/matrix-callback", (req, res) => {
+            const playUri = req.cookies.playUri;
+            if (!playUri) {
+                throw new Error("Missing playUri in cookies");
+            }
+
+            const query = validateQuery(req, res, z.object({ loginToken: z.string() }));
+            if (query === undefined) {
+                return;
+            }
+
+            res.atomic(() => {
+                res.clearCookie("playUri");
+                res.clearCookie("authToken");
+                const playUri = new URL(req.cookies.playUri);
+                playUri.searchParams.append("matrixLoginToken", query.loginToken);
+
+                const html = Mustache.render(this.redirectToPlayFile, {
+                    playUri: playUri.toString(),
+                });
+                res.type("html").send(html);
             });
             return;
         });
@@ -350,8 +465,16 @@ export class AuthenticateController extends BaseHttpController {
             const email = data.email;
             const roomUrl = data.roomUrl;
             const mapUrlStart = data.mapUrlStart;
+            const matrixUserId = email ? matrixProvider.getBareMatrixIdFromEmail(email) : undefined;
 
-            const authToken = jwtTokenManager.createAuthToken(email || userUuid);
+            const authToken = jwtTokenManager.createAuthToken(
+                email || userUuid,
+                undefined,
+                undefined,
+                undefined,
+                [],
+                matrixUserId
+            );
 
             res.atomic(() => {
                 res.json({
@@ -418,6 +541,11 @@ export class AuthenticateController extends BaseHttpController {
      *      - name: "token"
      *        in: "query"
      *        description: "A JWT authentication token ???"
+     *        required: true
+     *        type: "string"
+     *      - name: "playUri"
+     *        in: "query"
+     *        description: "Room URL of the current virtual place"
      *        required: true
      *        type: "string"
      *     responses:

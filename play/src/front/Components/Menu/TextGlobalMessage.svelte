@@ -1,7 +1,7 @@
 <script lang="ts">
     import Quill from "quill";
     import { onDestroy, onMount } from "svelte";
-    import { menuInputFocusStore } from "../../Stores/MenuStore";
+    import { menuInputFocusStore } from "../../Stores/MenuInputFocusStore";
     import { gameManager } from "../../Phaser/Game/GameManager";
     import { AdminMessageEventTypes } from "../../Connection/AdminMessagesService";
     import type { PlayGlobalMessageInterface } from "../../Connection/ConnexionModels";
@@ -70,8 +70,8 @@
     });
 </script>
 
-<section class="section-input-send-text">
-    <div class="input-send-text" bind:this={QUILL_EDITOR} />
+<section class="section-input-send-text test">
+    <div class="input-send-text" role="textbox" bind:this={QUILL_EDITOR} />
 </section>
 
 <style lang="scss">

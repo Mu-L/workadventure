@@ -363,6 +363,14 @@ class AnalyticsClient {
             .catch((e) => console.error(e));
     }
 
+    menuChat(): void {
+        this.posthogPromise
+            ?.then((posthog) => {
+                posthog.capture("wa_menu_chat");
+            })
+            .catch((e) => console.error(e));
+    }
+
     globalMessage(): void {
         this.posthogPromise
             ?.then((posthog) => {
@@ -461,6 +469,14 @@ class AnalyticsClient {
             .catch((e) => console.error(e));
     }
 
+    selectCompanion(): void {
+        this.posthogPromise
+            ?.then((posthog) => {
+                posthog.capture("wa_companionscene_select");
+            })
+            .catch((e) => console.error(e));
+    }
+
     selectCustomWoka(): void {
         this.posthogPromise
             ?.then((posthog) => {
@@ -477,10 +493,10 @@ class AnalyticsClient {
             .catch((e) => console.error(e));
     }
 
-    addNewParticipant(): void {
+    addNewParticipant(peerId: string, userId: number, uuid: string): void {
         this.posthogPromise
             ?.then((posthog) => {
-                posthog.capture("wa_spontaneous_discussion");
+                posthog.capture("wa_spontaneous_discussion", { peerId, userId, uuid });
             })
             .catch((e) => console.error(e));
     }
@@ -710,6 +726,78 @@ class AnalyticsClient {
         this.posthogPromise
             ?.then((posthog) => {
                 posthog.capture("wa-opened-room-list");
+            })
+            .catch((e) => console.error(e));
+    }
+
+    openedPopup(targetRectangle: string, id: number): void {
+        this.posthogPromise
+            ?.then((posthog) => {
+                posthog.capture("wa_opened_popup", { targetRectangle, id });
+            })
+            .catch((e) => console.error(e));
+    }
+
+    openGlobalMessage(): void {
+        this.posthogPromise
+            ?.then((posthog) => {
+                posthog.capture("wa_action_globalmessage");
+            })
+            .catch((e) => console.error(e));
+    }
+
+    openGlobalAudio(): void {
+        this.posthogPromise
+            ?.then((posthog) => {
+                posthog.capture("wa_action_globalaudio");
+            })
+            .catch((e) => console.error(e));
+    }
+
+    openExternalModuleCalendar(): void {
+        this.posthogPromise
+            ?.then((posthog) => {
+                posthog.capture("wa-opened-external-module-calendar");
+            })
+            .catch((e) => console.error(e));
+    }
+
+    openExternalModuleTodoList(): void {
+        this.posthogPromise
+            ?.then((posthog) => {
+                posthog.capture("wa-opened-external-module-todolist");
+            })
+            .catch((e) => console.error(e));
+    }
+
+    openExternalModule(): void {
+        this.posthogPromise
+            ?.then((posthog) => {
+                posthog.capture("wa-opened-external-module");
+            })
+            .catch((e) => console.error(e));
+    }
+
+    settingAudioVolume(): void {
+        this.posthogPromise
+            ?.then((posthog) => {
+                posthog.capture("wa_setting_audio_volume");
+            })
+            .catch((e) => console.error(e));
+    }
+
+    openPicker(applicationName: string): void {
+        this.posthogPromise
+            ?.then((posthog) => {
+                posthog.capture("wa_map-editor_open_picker", { applicationName });
+            })
+            .catch((e) => console.error(e));
+    }
+
+    openApplicationWithoutPicker(applicationName: string): void {
+        this.posthogPromise
+            ?.then((posthog) => {
+                posthog.capture("wa_map-editor_open_application", { applicationName });
             })
             .catch((e) => console.error(e));
     }

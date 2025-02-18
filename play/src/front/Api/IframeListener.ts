@@ -1,6 +1,8 @@
 import { Subject } from "rxjs";
-import { availabilityStatusToJSON, XmppSettingsMessage } from "@workadventure/messages";
-import { KLAXOON_ACTIVITY_PICKER_EVENT, ChatMessage, BanEvent } from "@workadventure/shared-utils";
+import { availabilityStatusToJSON } from "@workadventure/messages";
+import { BanEvent, ChatEvent, ChatMessage, KLAXOON_ACTIVITY_PICKER_EVENT } from "@workadventure/shared-utils";
+import { StartWritingEvent, StopWritingEvent } from "@workadventure/shared-utils/src/Events/WritingEvent";
+import { get } from "svelte/store";
 import { HtmlUtils } from "../WebRtc/HtmlUtils";
 import {
     additionnalButtonsMenu,
@@ -9,11 +11,8 @@ import {
     handleOpenMenuEvent,
     warningBannerStore,
 } from "../Stores/MenuStore";
-import type { PlayerInterface } from "../Phaser/Game/PlayerInterface";
 import { ProtobufClientUtils } from "../Network/ProtobufClientUtils";
 import type { MessageUserJoined } from "../Connection/ConnexionModels";
-import { localUserStore } from "../Connection/LocalUserStore";
-import { mediaManager, NotificationType } from "../WebRtc/MediaManager";
 import { analyticsClient } from "../Administration/AnalyticsClient";
 import { bannerStore, requestVisitCardsStore } from "../Stores/GameStore";
 import { modalIframeStore, modalVisibilityStore } from "../Stores/ModalStore";
@@ -55,6 +54,7 @@ import type { AddPlayerEvent } from "./Events/AddPlayerEvent";
 import { ModalEvent } from "./Events/ModalEvent";
 import { AddButtonActionBarEvent } from "./Events/Ui/ButtonActionBarEvent";
 import { ReceiveEventEvent } from "./Events/ReceiveEventEvent";
+import { StartStreamInBubbleEvent } from "./Events/ProximityMeeting/StartStreamInBubbleEvent";
 
 type AnswererCallback<T extends keyof IframeQueryMap> = (
     query: IframeQueryMap[T]["query"],
@@ -183,9 +183,6 @@ class IframeListener {
     private readonly _openInviteMenuStream: Subject<void> = new Subject();
     public readonly openInviteMenuStream = this._openInviteMenuStream.asObservable();
 
-    private readonly _chatTotalMessagesToSeeStream: Subject<number> = new Subject();
-    public readonly chatTotalMessagesToSeeStream = this._chatTotalMessagesToSeeStream.asObservable();
-
     private readonly _addButtonActionBarStream: Subject<AddActionsMenuKeyToRemotePlayerEvent> = new Subject();
     public readonly addButtonActionBarStream = this._addButtonActionBarStream.asObservable();
 
@@ -207,13 +204,27 @@ class IframeListener {
     private readonly _inviteUserButtonStream: Subject<boolean> = new Subject();
     public readonly inviteUserButtonStream = this._inviteUserButtonStream.asObservable();
 
+    private readonly _roomListStream: Subject<boolean> = new Subject();
+    public readonly roomListButtonStream = this._roomListStream.asObservable();
+
+    private readonly _chatMessageStream: Subject<ChatEvent> = new Subject();
+    public readonly chatMessageStream = this._chatMessageStream.asObservable();
+
+    private readonly _startTypingProximityMessageStream: Subject<StartWritingEvent> = new Subject();
+    public readonly startTypingProximityMessageStream = this._startTypingProximityMessageStream.asObservable();
+
+    private readonly _stopTypingProximityMessageStream: Subject<StopWritingEvent> = new Subject();
+    public readonly stopTypingProximityMessageStream = this._stopTypingProximityMessageStream.asObservable();
+
+    private readonly _startListeningToStreamInBubbleStream: Subject<StartStreamInBubbleEvent> = new Subject();
+    public readonly startListeningToStreamInBubbleStream = this._startListeningToStreamInBubbleStream.asObservable();
+
+    private readonly _stopListeningToStreamInBubbleStream: Subject<void> = new Subject();
+    public readonly stopListeningToStreamInBubbleStream = this._stopListeningToStreamInBubbleStream.asObservable();
+
     private readonly iframes = new Map<HTMLIFrameElement, string | undefined>();
     private readonly iframeCloseCallbacks = new Map<MessageEventSource, Set<() => void>>();
     private readonly scripts = new Map<string, HTMLIFrameElement>();
-
-    private chatIframe: HTMLIFrameElement | null = null;
-
-    private chatReady = false;
 
     private sendPlayerMove = false;
 
@@ -221,9 +232,6 @@ class IframeListener {
     private answerers: {
         [str in keyof IframeQueryMap]?: unknown;
     } = {};
-
-    // Note: Message Queue used to store message who can't be sent to the Chat because it's not ready yet
-    private messagesToChatQueue = new Array<IframeResponseEvent>();
 
     public getUIWebsiteIframeIdFromSource(source: MessageEventSource): string | undefined {
         for (const [iframe, id] of this.iframes.entries()) {
@@ -344,6 +352,7 @@ class IframeListener {
                     }
 
                     const iframeEvent = iframeEventGuarded.data;
+
                     if (iframeEvent.type === "showLayer") {
                         this._showLayerStream.next(iframeEvent.data);
                     } else if (iframeEvent.type === "hideLayer") {
@@ -357,11 +366,15 @@ class IframeListener {
                     } else if (iframeEvent.type === "cameraFollowPlayer") {
                         this._cameraFollowPlayerStream.next(iframeEvent.data);
                     } else if (iframeEvent.type === "chat") {
-                        scriptUtils.sendChat(iframeEvent.data, iframe.contentWindow ?? undefined);
+                        this._chatMessageStream.next(iframeEvent.data);
                     } else if (iframeEvent.type === "startWriting") {
-                        scriptUtils.startWriting(iframeEvent.data, iframe.contentWindow ?? undefined);
+                        this._startTypingProximityMessageStream.next(iframeEvent.data);
                     } else if (iframeEvent.type === "stopWriting") {
-                        scriptUtils.stopWriting(iframeEvent.data, iframe.contentWindow ?? undefined);
+                        this._stopTypingProximityMessageStream.next(iframeEvent.data);
+                    } else if (iframeEvent.type === "startListeningToStreamInBubble") {
+                        this._startListeningToStreamInBubbleStream.next(iframeEvent.data);
+                    } else if (iframeEvent.type === "stopListeningToStreamInBubble") {
+                        this._stopListeningToStreamInBubbleStream.next();
                     } else if (iframeEvent.type === "openChat") {
                         this._openChatStream.next(iframeEvent.data);
                     } else if (iframeEvent.type === "closeChat") {
@@ -452,18 +465,6 @@ class IframeListener {
                         this._askPositionStream.next(iframeEvent.data);
                     } else if (iframeEvent.type == "openInviteMenu") {
                         this._openInviteMenuStream.next();
-                    } else if (iframeEvent.type == "chatTotalMessagesToSee") {
-                        this._chatTotalMessagesToSeeStream.next(iframeEvent.data);
-                    } else if (iframeEvent.type == "notification") {
-                        const notificationType =
-                            iframeEvent.data.notificationType === 1
-                                ? NotificationType.discussion
-                                : NotificationType.message;
-                        mediaManager.createNotification(
-                            iframeEvent.data.userName,
-                            notificationType,
-                            iframeEvent.data.forum
-                        );
                     } else if (iframeEvent.type == "login") {
                         analyticsClient.login();
                         window.location.href = "/login";
@@ -479,20 +480,17 @@ class IframeListener {
                         modalIframeStore.set(iframeEvent.data);
                         modalVisibilityStore.set(true);
                     } else if (iframeEvent.type == "closeModal") {
+                        // Get modal and send close event to trigger close event
+                        const modalIframe = get(modalIframeStore);
+                        if (modalIframe) iframeListener.sendModalCloseTriggered(modalIframe);
+
+                        // Close modal
                         modalVisibilityStore.set(false);
                         modalIframeStore.set(null);
                     } else if (iframeEvent.type == "addButtonActionBar") {
                         additionnalButtonsMenu.addAdditionnalButtonActionBar(iframeEvent.data);
                     } else if (iframeEvent.type == "removeButtonActionBar") {
                         additionnalButtonsMenu.removeAdditionnalButtonActionBar(iframeEvent.data);
-                    } else if (iframeEvent.type == "chatReady") {
-                        this.chatReady = true;
-                        if (this.messagesToChatQueue.length > 0) {
-                            for (const message of this.messagesToChatQueue) {
-                                this.postMessageToChat(message);
-                            }
-                            this.messagesToChatQueue = [];
-                        }
                     } else if (iframeEvent.type == "openBanner") {
                         warningBannerStore.activateWarningContainer(iframeEvent.data.timeToClose);
                         bannerStore.set(iframeEvent.data);
@@ -526,6 +524,10 @@ class IframeListener {
                         this._inviteUserButtonStream.next(false);
                     } else if (iframeEvent.type == "restoreInviteUserButton") {
                         this._inviteUserButtonStream.next(true);
+                    } else if (iframeEvent.type == "disableRoomList") {
+                        this._roomListStream.next(false);
+                    } else if (iframeEvent.type == "restoreRoomList") {
+                        this._roomListStream.next(true);
                     } else {
                         // Keep the line below. It will throw an error if we forget to handle one of the possible values.
                         const _exhaustiveCheck: never = iframeEvent;
@@ -548,11 +550,6 @@ class IframeListener {
                 console.error('Could not register "iframeCloseCallbacks". No contentWindow.');
             }
         });
-    }
-
-    registerChatIframe(iframe: HTMLIFrameElement): void {
-        this.registerIframe(iframe);
-        this.chatIframe = iframe;
     }
 
     unregisterIframe(iframe: HTMLIFrameElement): void {
@@ -582,46 +579,51 @@ class IframeListener {
     }
 
     registerScript(scriptUrl: string, enableModuleMode = true): Promise<void> {
-        return new Promise<void>((resolve) => {
-            console.info("Loading map related script at ", scriptUrl);
+        return Promise.race([
+            new Promise<void>((resolve) => {
+                console.info("Loading map related script at ", scriptUrl);
 
-            const iframe = document.createElement("iframe");
-            iframe.id = IframeListener.getIFrameId(scriptUrl);
-            iframe.style.display = "none";
+                const iframe = document.createElement("iframe");
+                iframe.id = IframeListener.getIFrameId(scriptUrl);
+                iframe.style.display = "none";
 
-            // We are putting a sandbox on this script because it will run in the same domain as the main website.
-            iframe.sandbox.add("allow-scripts");
-            iframe.sandbox.add("allow-top-navigation-by-user-activation");
+                // We are putting a sandbox on this script because it will run in the same domain as the main website.
+                iframe.sandbox.add("allow-scripts");
+                iframe.sandbox.add("allow-top-navigation-by-user-activation");
 
-            //iframe.src = "data:text/html;charset=utf-8," + escape(html);
-            iframe.srcdoc =
-                "<!doctype html>\n" +
-                "\n" +
-                '<html lang="en">\n' +
-                "<head>\n" +
-                '<script src="' +
-                window.location.protocol +
-                "//" +
-                window.location.host +
-                '/iframe_api.js" ></script>\n' +
-                "<script " +
-                (enableModuleMode ? 'type="module" ' : "") +
-                'src="' +
-                scriptUrl +
-                '" ></script>\n' +
-                "<title></title>\n" +
-                "</head>\n" +
-                "</html>\n";
+                const scriptUrlObj = new URL(scriptUrl, window.location.href);
+                // Note: we define the base URL to be the same as the script URL to fix some issues with some scripts using Vite.
+                const scriptUrlBase = scriptUrlObj.protocol + "//" + scriptUrlObj.host;
 
-            iframe.addEventListener("load", () => {
-                resolve();
-            });
+                //iframe.src = "data:text/html;charset=utf-8," + escape(html);
+                iframe.srcdoc = `
+<!doctype html>
+<html lang="en">
+<head>
+<base href="${scriptUrlBase}">
+<script src="${window.location.protocol}//${window.location.host}/iframe_api.js" ></script>
+<script ${enableModuleMode ? 'type="module" ' : ""}src="${scriptUrl}" ></script>
+<title></title>
+</head>
+</html>
+`;
 
-            document.body.prepend(iframe);
+                iframe.addEventListener("load", () => {
+                    resolve();
+                });
 
-            this.scripts.set(scriptUrl, iframe);
-            this.registerIframe(iframe);
-        });
+                document.body.prepend(iframe);
+
+                this.scripts.set(scriptUrl, iframe);
+                this.registerIframe(iframe);
+            }),
+
+            new Promise<void>((_, reject) => {
+                setTimeout(() => {
+                    reject(new Error("Timeout while loading script " + scriptUrl));
+                }, 30_000);
+            }),
+        ]);
     }
 
     private getBaseUrl(src: string, source: MessageEventSource | null): string {
@@ -661,14 +663,6 @@ class IframeListener {
         iframe.remove();
 
         this.scripts.delete(scriptUrl);
-    }
-
-    cleanup() {
-        this.chatReady = false;
-        if (this.chatIframe) {
-            this.unregisterIframe(this.chatIframe);
-            this.chatIframe = null;
-        }
     }
 
     /**
@@ -751,6 +745,24 @@ class IframeListener {
         });
     }
 
+    sendFollowedEvent(follower: AddPlayerEvent) {
+        this.postMessage({
+            type: "onFollowed",
+            data: {
+                user: follower,
+            },
+        });
+    }
+
+    sendUnfollowedEvent(follower: AddPlayerEvent) {
+        this.postMessage({
+            type: "onUnfollowed",
+            data: {
+                user: follower,
+            },
+        });
+    }
+
     sendEnterEvent(name: string) {
         this.postMessage({
             type: "enterEvent",
@@ -799,6 +811,23 @@ class IframeListener {
     sendLeaveAreaEvent(areaName: string) {
         this.postMessage({
             type: "leaveAreaEvent",
+            data: {
+                name: areaName,
+            } as ChangeAreaEvent,
+        });
+    }
+
+    sendEnterMapEditorAreaEvent(areaName: string) {
+        this.postMessage({
+            type: "enterMapEditorAreaEvent",
+            data: {
+                name: areaName,
+            } as ChangeAreaEvent,
+        });
+    }
+    sendLeaveMapEditorAreaEvent(areaName: string) {
+        this.postMessage({
+            type: "leaveMapEditorAreaEvent",
             data: {
                 name: areaName,
             } as ChangeAreaEvent,
@@ -888,117 +917,55 @@ class IframeListener {
             },
         });
     }
-
-    sendChatVisibilityToChatIframe(visibility: boolean) {
-        this.postMessageToChat({
-            type: "chatVisibility",
-            data: {
-                visibility,
-            },
-        });
-    }
-    sendSettingsToChatIframe() {
-        if (!connectionManager.currentRoom) {
-            throw new Error("Race condition : Current room is not defined yet");
-        }
-
-        this.postMessageToChat({
-            type: "settings",
-            data: {
-                notification: localUserStore.getNotification(),
-                chatSounds: localUserStore.getChatSounds(),
-                enableChat: connectionManager.currentRoom?.enableChat,
-                enableChatUpload: connectionManager.currentRoom?.enableChatUpload,
-                enableChatOnlineList: connectionManager.currentRoom?.enableChatOnlineList,
-                enableChatDisconnectedList: connectionManager.currentRoom?.enableChatDisconnectedList,
-            },
-        });
-    }
-
-    sendXmppSettingsToChatIframe(xmppSettingsMessage: XmppSettingsMessage) {
-        this.postMessageToChat({
-            type: "xmppSettingsMessage",
-            data: xmppSettingsMessage,
-        });
-    }
-
-    sendLeaveMucEventToChatIframe(url: string) {
-        if (!connectionManager.currentRoom) {
+    async sendLeaveMucEventToChatIframe(url: string) {
+        /*if (!connectionManager.currentRoom) {
             throw new Error("Race condition : Current room is not defined yet");
         } else if (!connectionManager.currentRoom.enableChat) {
             return;
         }
-        this.postMessageToChat({
-            type: "leaveMuc",
-            data: {
-                url,
-            },
-        });
+        (await chatConnectionManager.connectionPromise).leaveMuc(url);*/
     }
 
-    sendJoinMucEventToChatIframe(url: string, name: string, type: string, subscribe: boolean) {
-        if (!connectionManager.currentRoom) {
+    async sendJoinMucEventToChatIframe(url: string, name: string, type: string, subscribe: boolean) {
+        /*if (!connectionManager.currentRoom) {
             throw new Error("Race condition : Current room is not defined yet");
         } else if (!connectionManager.currentRoom.enableChat) {
             return;
         }
-        this.postMessageToChat({
-            type: "joinMuc",
-            data: {
-                url,
-                name,
-                type,
-                subscribe,
-            },
-        });
-    }
-
-    sendAvailabilityStatusToChatIframe(status: number) {
-        this.postMessageToChat({
-            type: "availabilityStatus",
-            data: status,
-        });
-    }
-
-    // << TODO delete with chat XMPP integration for the discussion circle
-    sendWritingStatusToChatIframe(list: Set<PlayerInterface>) {
-        const usersTyping: Array<{
-            jid?: string;
-            name?: string;
-        }> = [];
-        list.forEach((user) =>
-            usersTyping.push({
-                jid: user.userJid === "fake" ? undefined : user.userJid,
-                name: user.name,
-            })
-        );
-        this.postMessageToChat({
-            type: "updateWritingStatusChatList",
-            data: {
-                users: usersTyping,
-            },
-        });
+        (await chatConnectionManager.connectionPromise).joinMuc(name, url, type, subscribe);*/
     }
 
     sendMessageToChatIframe(chatMessage: ChatMessage) {
-        this.postMessageToChat({
-            type: "addChatMessage",
-            data: chatMessage,
-        });
+        /*if (chatMessage.text == undefined) {
+            return;
+        }
+        const mucRoomDefault = mucRoomsStore.getDefaultRoom();
+        let userData = undefined;
+        if (mucRoomDefault && chatMessage.author && chatMessage.author.jid !== "fake") {
+            try {
+                userData = mucRoomDefault.getUserByJid(chatMessage.author.jid);
+            } catch (e) {
+                console.warn("Can't fetch user data from Ejabberd", e);
+                userData = chatMessage.author;
+            }
+        } else {
+            userData = chatMessage.author;
+        }
+
+        if (chatMessage.type === ChatMessageTypes.text) {
+            if (!userData) {
+                throw new Error("Received a message from the scripting API without an author");
+            }
+            for (const chatMessageText of chatMessage.text) {
+                chatMessagesStore.addExternalMessage(userData, chatMessageText, userData.name);
+            }
+        } else if (chatMessage.type === ChatMessageTypes.me) {
+            for (const chatMessageText of chatMessage.text) {
+                chatMessagesStore.addPersonalMessage(chatMessageText);
+            }
+        }*/
     }
 
-    sendComingUserToChatIframe(chatMessage: ChatMessage) {
-        this.postMessageToChat({
-            type: "comingUser",
-            data: chatMessage,
-        });
-    }
-    sendPeerConnexionStatusToChatIframe(status: boolean) {
-        this.postMessageToChat({
-            type: "peerConnectionStatus",
-            data: status,
-        });
-    }
     sendButtonActionBarTriggered(buttonActionBar: AddButtonActionBarEvent): void {
         this.postMessage({
             type: "buttonActionBarTrigger",
@@ -1014,28 +981,18 @@ class IframeListener {
     // end delete >>
 
     /**
-     * Sends the message... to the chat iFrame.
+     * Sends the message to all allowed iframes.
      */
-    postMessageToChat(message: IframeResponseEvent) {
-        if (!this.chatIframe) {
-            this.chatIframe = document.getElementById("chatWorkAdventure") as HTMLIFrameElement | null;
-        }
-        if (!this.chatReady || !this.chatIframe) {
-            this.messagesToChatQueue.push(message);
-        } else {
-            this.chatIframe.contentWindow?.postMessage(message, this.chatIframe?.src);
-        }
-    }
-
-    /**
-     * Sends the message... to all allowed iframes and not the chat.
-     */
-    public postMessage(message: IframeResponseEvent, exceptOrigin?: MessageEventSource) {
+    public postMessage(
+        message: IframeResponseEvent,
+        exceptOrigin?: MessageEventSource,
+        transfer?: Transferable[]
+    ): void {
         for (const iframe of this.iframes.keys()) {
-            if (exceptOrigin === iframe.contentWindow || iframe.src === this.chatIframe?.src) {
+            if (exceptOrigin === iframe.contentWindow) {
                 continue;
             }
-            iframe.contentWindow?.postMessage(message, "*");
+            iframe.contentWindow?.postMessage(message, "*", transfer);
         }
     }
 
@@ -1088,6 +1045,8 @@ class IframeListener {
             source ?? undefined
         );
     }
+
+    cleanup() {}
 
     /*dispatchScriptableEventToOtherIframes(
         key: string,

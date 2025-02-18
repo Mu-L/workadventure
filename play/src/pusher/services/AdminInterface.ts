@@ -1,7 +1,15 @@
-import type { MapDetailsData, RoomRedirect, AdminApiData, ErrorApiData } from "@workadventure/messages";
+import type {
+    AdminApiData,
+    ErrorApiData,
+    MapDetailsData,
+    MemberData,
+    OauthRefreshToken,
+    RoomRedirect,
+} from "@workadventure/messages";
 import { Capabilities } from "@workadventure/messages";
-import type { AdminBannedData, FetchMemberDataByUuidResponse } from "./AdminApi";
+import { AdminBannedData, FetchMemberDataByUuidResponse } from "./AdminApi";
 import { ShortMapDescriptionList } from "./ShortMapDescription";
+import { WorldChatMembersData } from "./WorldChatMembersData";
 
 export interface AdminInterface {
     /**
@@ -18,7 +26,9 @@ export interface AdminInterface {
         ipAddress: string,
         characterTextureIds: string[],
         companionTextureId?: string,
-        locale?: string
+        locale?: string,
+        tags?: string[],
+        chatID?: string
     ): Promise<FetchMemberDataByUuidResponse>;
 
     /**
@@ -79,7 +89,12 @@ export interface AdminInterface {
      * @param roomUrl
      * @return string[]
      */
-    getUrlRoomsFromSameWorld(roomUrl: string, locale?: string, tags?: string[]): Promise<ShortMapDescriptionList>;
+    getUrlRoomsFromSameWorld(
+        roomUrl: string,
+        locale?: string,
+        tags?: string[],
+        bypassTagFilter?: boolean
+    ): Promise<ShortMapDescriptionList>;
 
     /**
      * @param accessToken
@@ -98,8 +113,7 @@ export interface AdminInterface {
         playUri: string,
         name: string,
         message: string,
-        byUserUuid: string,
-        byUserEmail?: string
+        byUserUuid: string
     ): Promise<boolean>;
 
     getTagsList(roomUrl: string): Promise<string[]>;
@@ -111,7 +125,19 @@ export interface AdminInterface {
 
     saveTextures(userIdentifier: string, textures: string[], roomUrl: string): Promise<void>;
 
-    saveCompanionTexture(userIdentifier: string, texture: string, roomUrl: string): Promise<void>;
+    saveCompanionTexture(userIdentifier: string, texture: string | null, roomUrl: string): Promise<void>;
 
     getCapabilities(): Promise<Capabilities>;
+
+    searchMembers(roomUrl: string, searchText: string): Promise<MemberData[]>;
+
+    searchTags(world: string, searchText: string): Promise<string[]>;
+
+    getMember(memberUUID: string): Promise<MemberData>;
+
+    getWorldChatMembers(playUri: string, searchText: string): Promise<WorldChatMembersData>;
+
+    updateChatId(userIdentifier: string, chatId: string, roomUrl: string): Promise<void>;
+
+    refreshOauthToken(token: string): Promise<OauthRefreshToken>;
 }

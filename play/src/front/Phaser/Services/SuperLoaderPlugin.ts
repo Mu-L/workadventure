@@ -1,6 +1,9 @@
 import CancelablePromise from "cancelable-promise";
 import type { Scene } from "phaser";
+import Debug from "debug";
 import Texture = Phaser.Textures.Texture;
+
+const debug = Debug("SuperLoad");
 
 /**
  * A wrapper around Phaser LoaderPlugin. Each method returns a (cancelable) Promise that resolves as soon as
@@ -11,6 +14,17 @@ import Texture = Phaser.Textures.Texture;
  */
 export class SuperLoaderPlugin {
     constructor(private scene: Scene) {}
+
+    /**
+     * Add any promise to the loader.
+     * The loader will consider the promise as a resource that is being loaded. Loading is done when the promise is resolved or rejected.
+     */
+    public loadPromise(promise: Promise<unknown>) {
+        //eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (this.scene.load as any).rexAwait((successCallback: () => void, failureCallback: (e: unknown) => void) => {
+            promise.then(successCallback).catch(failureCallback);
+        });
+    }
 
     public spritesheet(
         key: string,
@@ -150,7 +164,7 @@ export class SuperLoaderPlugin {
                 if (immediateCallback) {
                     immediateCallback(key, type, data);
                 }
-                console.info("Resolve done for ", url);
+                debug("Resolve done for ", url);
             };
 
             cancel(() => {

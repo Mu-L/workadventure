@@ -1,6 +1,7 @@
 <script lang="ts">
     import { createEventDispatcher, onMount } from "svelte";
     import { ExitPropertyData, WAMFileFormat } from "@workadventure/map-editor";
+    import { wamFileMigration } from "@workadventure/map-editor/src/Migrations/WamFileMigration";
     import axios from "axios";
     import { LL } from "../../../../i18n/i18n-svelte";
     import { gameManager } from "../../../Phaser/Game/GameManager";
@@ -46,7 +47,7 @@
             }
 
             const response = await axios.get(wamUrl);
-            const result = WAMFileFormat.safeParse(response.data);
+            const result = WAMFileFormat.safeParse(wamFileMigration.migrate(response.data));
             if (result.success && result.data && result.data.areas) {
                 startAreas = result.data.areas
                     .filter((area) => area.properties.find((property) => property.type === "start"))
@@ -69,9 +70,9 @@
         dispatch("close");
     }}
 >
-    <span slot="header" class="tw-flex tw-justify-center tw-items-center">
+    <span slot="header" class="flex justify-center items-center">
         <img
-            class="tw-w-6 tw-mr-1"
+            class="w-6 mr-1"
             src="resources/icons/icon_exit.png"
             alt={$LL.mapEditor.properties.exitProperties.description()}
         />
@@ -82,7 +83,7 @@
             <label for="exitMapSelector">{$LL.mapEditor.properties.exitProperties.exitMap()}</label>
             <select
                 id="exitMapSelector"
-                class="tw-w-full"
+                class="w-full"
                 bind:value={property.url}
                 on:change={() => {
                     onValueChange();
@@ -101,7 +102,7 @@
                 >
                 <select
                     id="startAreaNameSelector"
-                    class="tw-w-full"
+                    class="w-full"
                     bind:value={property.areaName}
                     on:change={onValueChange}
                     on:blur={onValueChange}
@@ -112,9 +113,6 @@
                     {#each startAreas as areaName (areaName)}
                         <option value={areaName} selected={areaName === property.areaName}>{areaName}</option>
                     {/each}
-                    {#if startAreas.length === 0}
-                        <option value={""} selected>No start area found</option>
-                    {/if}
                 </select>
             </div>
         {/if}

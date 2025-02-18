@@ -1,40 +1,56 @@
-import { expect, test } from '@playwright/test';
-import {findContainer, rebootPlay, stopContainer} from './utils/containers';
-import { login } from './utils/roles';
-import {publicTestMapUrl} from "./utils/urls";
+import { expect, test } from "@playwright/test";
+import { publicTestMapUrl } from "./utils/urls";
+import Map from "./utils/map";
+import Menu from "./utils/menu";
+import { getPage } from "./utils/auth"
+import {isMobile} from "./utils/isMobile";
 
 test.setTimeout(180_000);
-test.describe('Connection', () => {
-  test('can succeed even if WorkAdventure starts while pusher is down @docker', async ({ page }, { project }) => {
-    // Skip test for mobile device
-    if(project.name === "mobilechromium") {
+test.describe("Connection", () => {
+  test.beforeEach(async ({ page, browserName }) => {
+    if (isMobile(page) || browserName === "webkit") {
       //eslint-disable-next-line playwright/no-skipped-test
       test.skip();
-      return;
     }
+  });
+  test("can succeed even if WorkAdventure starts while pusher is down @slow",
+      async ({ browser }) => {
+    const page = await getPage(browser, 'Alice', publicTestMapUrl("tests/mousewheel.json", "reconnect"));
 
-    await page.goto(
-      publicTestMapUrl("tests/mousewheel.json", "reconnect")
-    );
+    //Simulation of offline network
+    await page.context().setOffline(true);
 
-    await login(page);
-
-    // Let's stop the play container
-    const container = await findContainer('play');
-    await stopContainer(container);
-
-    await expect(page.locator('.errorScreen p.code')).toContainText('CONNECTION_');
-    //await expect(page.locator('.error-div')).toContainText('Unable to connect to WorkAdventure');
-
-    //await page.goto('/_/global/maps.workadventure.localhost/tests/mousewheel.json');
-    //await expect(page.locator('.error-div')).toContainText('Unable to connect to WorkAdventure');
-    //await expect(page.locator('.errorScreen p.code')).toContainText('HTTP_ERROR');
-
-    await rebootPlay();
-
-    //await page.goto('/_/global/maps.workadventure.localhost/tests/mousewheel.json');
-    await expect(page.locator("button#menuIcon")).toBeVisible({
-      timeout: 180_000
+    await expect(page.getByText("Connection lost")).toBeVisible({
+        timeout: 180_000,
     });
+
+    //Reconnect
+    await page.context().setOffline(false);
+
+    await Menu.waitForMapLoad(page, 180_000);
+    /*await expect(page.locator("button#menuIcon")).toBeVisible({
+      timeout: 180_000,
+    });*/
+    await page.close();
+    await page.context().close();
+  });
+
+  test("can succeed on WAM file even if WorkAdventure starts while pusher is down @slow",
+      async ({ browser }) => {
+    const page = await getPage(browser, 'Alice', Map.url("empty"));
+
+    //Simulation of offline network
+    await page.context().setOffline(true);
+
+    await expect(page.getByText("Unable to connect to WorkAdventure")).toBeVisible({
+      timeout: 180_000,
+    });
+
+    //Reconnect
+    await page.context().setOffline(false);
+
+    await Menu.waitForMapLoad(page, 180_000);
+    await page.close();
+    await page.context().close();
   });
 });

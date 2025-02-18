@@ -1,7 +1,6 @@
 <script lang="ts">
     import { fade } from "svelte/transition";
     import { UpdateMegaphoneSettingMessage } from "@workadventure/messages";
-    import { InfoIcon } from "svelte-feather-icons";
     import { gameManager } from "../../../Phaser/Game/GameManager";
     import { LL } from "../../../../i18n/i18n-svelte";
     import InputText from "../../Input/InputText.svelte";
@@ -10,16 +9,12 @@
     import PureLoader from "../../PureLoader.svelte";
     import ButtonState from "../../Input/ButtonState.svelte";
     import { executeUpdateWAMSettings } from "../../../Phaser/Game/MapEditor/Commands/Facades";
-
-    type Option = {
-        value: string;
-        label: string;
-        created: undefined | boolean;
-    };
+    import { InputTagOption } from "../../Input/InputTagOption";
+    import { IconInfoCircle } from "@wa-icons";
 
     let enabled: boolean = gameManager.getCurrentGameScene().wamFile?.settings?.megaphone?.enabled ?? false;
     const oldRights: string[] = gameManager.getCurrentGameScene().wamFile?.settings?.megaphone?.rights ?? [];
-    let rights: Option[] = [];
+    let rights: InputTagOption[] = [];
     let title: string = gameManager.getCurrentGameScene().wamFile?.settings?.megaphone?.title ?? "MyMegaphone";
     let scope: string = gameManager.getCurrentGameScene().wamFile?.settings?.megaphone?.scope ?? "WORLD";
     let scopes = [
@@ -82,7 +77,7 @@
         }
     }
 
-    async function getTags(): Promise<Option[]> {
+    async function getTags(): Promise<InputTagOption[]> {
         loading = true;
         rights = oldRights.map((right) => ({ value: right, label: right.toLocaleUpperCase(), created: undefined }));
         const _tags = ((await gameManager.getCurrentGameScene().connection?.queryRoomTags()) ?? []).concat(
@@ -95,15 +90,16 @@
     }
 </script>
 
-<div class="tw-flex tw-flex-wrap tw-gap-x-4 tw-items-center tw-h-fit">
+<div class="flex flex-wrap gap-x-4 items-center h-fit">
     <input type="checkbox" class="input-switch" bind:checked={enabled} on:change={partialSave} disabled={loading} />
-    <h3>{$LL.mapEditor.settings.megaphone.title()}</h3>
+    <h3 id="megaphone">{$LL.mapEditor.settings.megaphone.title()}</h3>
 </div>
-<p class="help-text tw-h-fit">{$LL.mapEditor.settings.megaphone.description()}</p>
+
+<p class="help-text h-fit">{$LL.mapEditor.settings.megaphone.description()}</p>
 {#if enabled}
-    <div class="settings tw-flex-grow tw-flex-auto tw-flex-shrink" transition:fade={{ duration: 200 }}>
+    <div class="settings space-y-4 flex-grow flex-auto flex-shrink" transition:fade={{ duration: 200 }}>
         {#await getTags()}
-            <PureLoader size={12} color="lighter-purple" customClass="tw-h-full" />
+            <PureLoader size={12} color="lighter-purple" customClass="h-full" />
         {:then tags}
             <InputText
                 errorHelperText={dynamicStrings.error.title}
@@ -113,13 +109,19 @@
                 onKeyPress={() => (dynamicStrings.error.title = "")}
             />
             <InputSelect label={$LL.mapEditor.settings.megaphone.inputs.scope()} options={scopes} bind:value={scope} />
-            <p class="help-text"><InfoIcon size="18" /> {$LL.mapEditor.settings.megaphone.inputs.spaceNameHelper()}</p>
+            <p class="help-text">
+                <IconInfoCircle font-size="18" />
+                {$LL.mapEditor.settings.megaphone.inputs.spaceNameHelper()}
+            </p>
             <InputTags
                 label={$LL.mapEditor.settings.megaphone.inputs.rights()}
                 options={tags ?? []}
                 bind:value={rights}
             />
-            <p class="help-text"><InfoIcon size="18" /> {$LL.mapEditor.settings.megaphone.inputs.rightsHelper()}</p>
+            <p class="help-text">
+                <IconInfoCircle font-size="18" />
+                {$LL.mapEditor.settings.megaphone.inputs.rightsHelper()}
+            </p>
             <ButtonState promise={save} initialText={$LL.menu.settings.save()} loadingText="Saving" />
         {:catch error}
             <p class="help-text">{error}</p>

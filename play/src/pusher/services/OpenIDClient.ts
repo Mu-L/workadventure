@@ -13,6 +13,7 @@ import {
     OPID_SCOPE,
     OPID_PROMPT,
     SECRET_KEY,
+    OPID_TAGS_CLAIM,
 } from "../enums/EnvironmentVariable";
 
 class OpenIDClient {
@@ -60,9 +61,9 @@ class OpenIDClient {
 
     public authorizationUrl(
         res: Response,
-        redirect: string | undefined,
         playUri: string,
-        req: Request
+        req: Request,
+        manuallyTriggered: "true" | undefined
     ): Promise<string> {
         return this.initClient().then((client) => {
             if (!OPID_SCOPE.includes("email") || !OPID_SCOPE.includes("openid")) {
@@ -93,7 +94,10 @@ class OpenIDClient {
                 state: state,
                 //nonce: nonce,
                 playUri,
-                redirect: redirect,
+                // Whether the login was triggered by clicking on the "sign in" button (in which case the user was
+                // anonymous) or whether the login was triggered because user was not authenticated and authentication
+                // is mandatory.
+                manuallyTriggered,
 
                 code_challenge,
                 code_challenge_method: "S256",
@@ -103,8 +107,18 @@ class OpenIDClient {
 
     public getUserInfo(
         req: Request,
-        res: Response
-    ): Promise<{ email: string; sub: string; access_token: string; username: string; locale: string }> {
+        res: Response,
+        playUri: string
+    ): Promise<{
+        tags: string[] | undefined;
+        email: string;
+        sub: string;
+        access_token: string;
+        username: string;
+        locale: string;
+        matrix_url: string | undefined;
+        matrix_identity_provider: string | undefined;
+    }> {
         const fullUrl = req.url;
         const cookies = req.cookies;
 
@@ -130,16 +144,25 @@ class OpenIDClient {
                 res.clearCookie("code_verifier");
                 res.clearCookie("oidc_state");
 
-                return client.userinfo(tokenSet).then((res) => {
-                    return {
-                        ...res,
-                        email: res.email ?? "",
-                        sub: res.sub,
-                        access_token: tokenSet.access_token ?? "",
-                        username: res[OPID_USERNAME_CLAIM] as string,
-                        locale: res[OPID_LOCALE_CLAIM] as string,
-                    };
-                });
+                return client
+                    .userinfo(tokenSet, {
+                        params: {
+                            playUri,
+                        },
+                    })
+                    .then((res) => {
+                        return {
+                            ...res,
+                            email: res.email ?? "",
+                            sub: res.sub,
+                            access_token: tokenSet.access_token ?? "",
+                            username: res[OPID_USERNAME_CLAIM] as string,
+                            locale: res[OPID_LOCALE_CLAIM] as string,
+                            tags: res[OPID_TAGS_CLAIM] as string[],
+                            matrix_url: res.matrix_url as string | undefined,
+                            matrix_identity_provider: res.matrix_identity_provider as string | undefined,
+                        };
+                    });
             });
         });
     }

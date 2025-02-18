@@ -74,6 +74,7 @@ Add a custom menu item containing the text `commandDescriptor` in the navbar of 
 - `iframe: string` : A click on the custom menu will open the `iframe` inside the menu.
 - `key?: string` : A unique identifier for your menu item.
 - `allowApi?: boolean` : Allow the iframe of the custom menu to use the Scripting API.
+- `allow?: string` : The `allow` attribute used by the iframe.
 
 Important : `options` accepts only `callback` or `iframe` not both.
 
@@ -186,7 +187,7 @@ When clicking on other player's WOKA, the contextual menu (we call it ActionsMen
 To do that, we need to listen for the `onRemotePlayerClicked` stream and make use of the `remotePlayer` object that is passed by as a payload.
 
 ```ts
-WA.ui.onRemotePlayerClicked.subscribe((remotePlayer: RemotePlayerInterface) => {
+WA.ui.onRemotePlayerClicked.subscribe((remotePlayer: RemotePlayer) => {
     remotePlayer.addAction('Ask to tell a joke', () => {
         console.log('I am NOT telling you a joke!');
     });
@@ -406,7 +407,7 @@ WA.ui.actionBar.addButton(descriptor: {
 - id: the id of the button action bar defined.
 - label: the label to display in the button.
 - type: the type of button ('button' / 'action'). By default is 'button'.
-- imageSrc: image of button associated.
+- imageSrc: URL of the button's image (relative to the map file).
 - toolTip: label displayed above the action button.
 - clickCallback: function called when the user clicks on the button. The callback is passed a `AddButtonActionBar` instance in parameter.
 

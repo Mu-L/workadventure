@@ -1,25 +1,28 @@
-import { derived, get, writable } from "svelte/store";
+import { derived, get, writable, Readable } from "svelte/store";
+import type { Translation } from "../../i18n/i18n-types";
+import {
+    AddActionButtonActionBarEvent,
+    AddButtonActionBarEvent,
+    AddClassicButtonActionBarEvent,
+    RemoveButtonActionBarEvent,
+} from "../Api/Events/Ui/ButtonActionBarEvent";
+import { connectionManager } from "../Connection/ConnectionManager";
+import { localUserStore } from "../Connection/LocalUserStore";
+import { ABSOLUTE_PUSHER_URL } from "../Enum/ComputedConst";
 import {
     CONTACT_URL,
-    OPID_PROFILE_SCREEN_PROVIDER,
     ENABLE_REPORT_ISSUES_MENU,
+    OPID_PROFILE_SCREEN_PROVIDER,
     REPORT_ISSUES_URL,
 } from "../Enum/EnvironmentVariable";
-import type { Translation } from "../../i18n/i18n-types";
-import { localUserStore } from "../Connection/LocalUserStore";
-import { connectionManager } from "../Connection/ConnectionManager";
-import {
-    AddButtonActionBarEvent,
-    RemoveButtonActionBarEvent,
-    AddClassicButtonActionBarEvent,
-    AddActionButtonActionBarEvent,
-} from "../Api/Events/Ui/ButtonActionBarEvent";
-import { ABSOLUTE_PUSHER_URL } from "../Enum/ComputedConst";
-import { userIsAdminStore } from "./GameStore";
+import { gameManager } from "../Phaser/Game/GameManager";
+import { userHasAccessToBackOfficeStore, userIsAdminStore } from "./GameStore";
+import { megaphoneCanBeUsedStore } from "./MegaphoneStore";
+import { isMatrixChatEnabledStore } from "./ChatStore";
+import { gameSceneStore } from "./GameSceneStore";
 
 export const menuIconVisiblilityStore = writable(false);
 export const menuVisiblilityStore = writable(false);
-export const menuInputFocusStore = writable(false);
 export const userIsConnected = writable(false);
 
 export const profileAvailable = derived(userIsConnected, ($userIsConnected) => {
@@ -56,13 +59,15 @@ export enum SubMenusInterface {
     globalMessages = "globalMessages",
     contact = "contact",
     report = "report",
+    chat = "chat",
 }
 
-type MenuKeys = keyof Translation["menu"]["sub"];
+export type MenuKeys = keyof Translation["menu"]["sub"];
 
 export interface TranslatedMenu {
     type: "translated";
     key: MenuKeys;
+    visible: Readable<boolean>;
 }
 
 /**
@@ -72,85 +77,76 @@ interface ScriptingMenu {
     type: "scripting";
     label: string;
     key: string;
+    visible: Readable<boolean>;
 }
 
 export type MenuItem = TranslatedMenu | ScriptingMenu;
-
-export const inviteMenu: MenuItem = {
-    type: "translated",
-    key: SubMenusInterface.invite,
-};
 
 export const inviteUserActivated = writable(true);
 export const mapEditorActivated = writable(false);
 export const mapManagerActivated = writable(true);
 export const screenSharingActivatedStore = writable(true);
+export const mapEditorActivatedForCurrentArea = writable(false);
+export const mapEditorActivatedForThematics = writable(false);
+export const roomListActivated = writable(true);
+export const contactPageStore = writable<string | undefined>(CONTACT_URL);
+
+const alwaysVisible = writable(true);
 
 function createSubMenusStore() {
     const store = writable<MenuItem[]>([
         {
             type: "translated",
             key: SubMenusInterface.profile,
+            visible: profileAvailable,
         },
         {
             type: "translated",
             key: SubMenusInterface.settings,
+            visible: alwaysVisible,
         },
         {
             type: "translated",
             key: SubMenusInterface.aboutRoom,
+            visible: alwaysVisible,
         },
-        inviteMenu,
+        {
+            type: "translated",
+            key: SubMenusInterface.invite,
+            visible: inviteUserActivated,
+        },
         {
             type: "translated",
             key: SubMenusInterface.globalMessages,
+            visible: userIsAdminStore,
+        },
+        {
+            type: "translated",
+            key: SubMenusInterface.chat,
+            visible: isMatrixChatEnabledStore,
         },
         {
             type: "translated",
             key: SubMenusInterface.contact,
+            visible: derived(contactPageStore, ($contactPageStore) => $contactPageStore !== undefined),
+        },
+        {
+            type: "translated",
+            key: SubMenusInterface.report,
+            visible: derived(
+                gameSceneStore,
+                ($gameSceneStore) =>
+                    $gameSceneStore?.room.reportIssuesUrl !== undefined ||
+                    (ENABLE_REPORT_ISSUES_MENU != undefined &&
+                        ENABLE_REPORT_ISSUES_MENU &&
+                        REPORT_ISSUES_URL != undefined)
+            ),
         },
     ]);
     const { subscribe, update } = store;
 
-    // It is ok to not unsubscribe to this store because the function is called only once
-    // eslint-disable-next-line svelte/no-ignored-unsubscribe
-    inviteUserActivated.subscribe((value) => {
-        //update menu tab
-        update((valuesSubMenusStore) => {
-            const indexInviteMenu = valuesSubMenusStore.findIndex(
-                (menu) => (menu as TranslatedMenu).key === SubMenusInterface.invite
-            );
-            if (value && indexInviteMenu === -1) {
-                valuesSubMenusStore.splice(3, 0, inviteMenu);
-            } else if (!value && indexInviteMenu !== -1) {
-                valuesSubMenusStore.splice(indexInviteMenu, 1);
-            }
-            return valuesSubMenusStore;
-        });
-    });
-
     return {
         subscribe,
-        addTranslatedMenu(menuCommand: MenuKeys) {
-            update((menuList) => {
-                if (!menuList.find((menu) => menu.type === "translated" && menu.key === menuCommand)) {
-                    menuList.push({
-                        type: "translated",
-                        key: menuCommand,
-                    });
-                }
-                return menuList;
-            });
-        },
-        removeTranslatedMenu(menuCommand: MenuKeys) {
-            update((menuList) => {
-                const index = menuList.findIndex((menu) => menu.type === "translated" && menu.key === menuCommand);
-                if (index !== -1) {
-                    menuList.splice(index, 1);
-                }
-                return menuList;
-            });
-        },
         /**
          * Returns a translated menu item by its key.
          * Throw an error if the key was not found.
@@ -187,6 +183,7 @@ function createSubMenusStore() {
                         type: "scripting",
                         label: menuCommand,
                         key: menuKey,
+                        visible: alwaysVisible,
                     });
                 }
                 return menuList;
@@ -200,22 +197,6 @@ function createSubMenusStore() {
                 }
                 return menuList;
             });
-        },
-        addReportIssuesMenu() {
-            if (
-                connectionManager.currentRoom?.reportIssuesUrl != undefined ||
-                (ENABLE_REPORT_ISSUES_MENU != undefined &&
-                    ENABLE_REPORT_ISSUES_MENU === true &&
-                    REPORT_ISSUES_URL != undefined)
-            ) {
-                update((valuesSubMenusStore) => {
-                    valuesSubMenusStore.push({
-                        type: "translated",
-                        key: SubMenusInterface.report,
-                    });
-                    return valuesSubMenusStore;
-                });
-            }
         },
     };
 }
@@ -244,29 +225,14 @@ function createActiveSubMenuStore() {
 
 export const activeSubMenuStore = createActiveSubMenuStore();
 
-export const contactPageStore = writable<string | undefined>(CONTACT_URL);
-
-export function checkSubMenuToShow() {
-    subMenusStore.removeTranslatedMenu(SubMenusInterface.globalMessages);
-    subMenusStore.removeTranslatedMenu(SubMenusInterface.contact);
-
-    if (get(userIsAdminStore)) {
-        subMenusStore.addTranslatedMenu(SubMenusInterface.globalMessages);
-    }
-
-    if (get(contactPageStore) !== undefined) {
-        subMenusStore.addTranslatedMenu(SubMenusInterface.contact);
-    }
-}
-
-export const customMenuIframe = new Map<string, { url: string; allowApi: boolean }>();
+export const customMenuIframe = new Map<string, { url: string; allowApi: boolean; allow?: string | undefined }>();
 
 export function handleMenuRegistrationEvent(
     menuName: string,
     iframeUrl: string | undefined = undefined,
     key: string,
     source: string | undefined = undefined,
-    options: { allowApi: boolean }
+    options: { allowApi: boolean; allow?: string | undefined }
 ) {
     if (get(subMenusStore).find((item) => item.type === "scripting" && item.label === menuName)) {
         console.warn("The menu " + menuName + " already exist.");
@@ -277,7 +243,7 @@ export function handleMenuRegistrationEvent(
 
     if (iframeUrl !== undefined) {
         const url = new URL(iframeUrl, source);
-        customMenuIframe.set(key, { url: url.toString(), allowApi: options.allowApi });
+        customMenuIframe.set(key, { url: url.toString(), allowApi: options.allowApi, allow: options.allow });
     }
 }
 
@@ -307,7 +273,15 @@ function createAdditionalButtonsMenu() {
         subscribe,
         addAdditionnalButtonActionBar(button: AddButtonActionBarEvent) {
             update((additionnalButtonsMenu) => {
-                additionnalButtonsMenu.set(button.id, button);
+                if (button.type === "action") {
+                    additionnalButtonsMenu.set(button.id, {
+                        ...button,
+                        imageSrc: new URL(button.imageSrc, gameManager.currentStartedRoom.mapUrl).toString(),
+                    });
+                } else {
+                    additionnalButtonsMenu.set(button.id, button);
+                }
+
                 return additionnalButtonsMenu;
             });
         },
@@ -333,3 +307,66 @@ additionnalButtonsMenu.subscribe((map) => {
         [...map.values()].filter((c) => c.type === "action") as AddActionButtonActionBarEvent[]
     );
 });
+
+// The store that decides what tools to display just below the menu (typically triggered when you click on an item in the action bar)
+export const activeSecondaryZoneActionBarStore = writable<"emote" | "audio-manager" | undefined>(undefined);
+
+export const helpTextDisabledStore = derived(
+    activeSecondaryZoneActionBarStore,
+    ($activeSecondaryZoneActionBarStore) => {
+        return $activeSecondaryZoneActionBarStore !== undefined;
+    }
+);
+
+export const mapEditorMenuVisibleStore = derived(
+    [mapEditorActivated, mapManagerActivated, mapEditorActivatedForThematics],
+    ([$mapEditorActivated, $mapManagerActivated, $mapEditorActivatedForThematics]) => {
+        return ($mapEditorActivated || $mapEditorActivatedForThematics) && $mapManagerActivated;
+    }
+);
+export const backOfficeMenuVisibleStore = userHasAccessToBackOfficeStore;
+export const globalMessageVisibleStore = derived(
+    [megaphoneCanBeUsedStore, userIsAdminStore],
+    ([$megaphoneCanBeUsedStore, $userIsAdminStore]) => {
+        return $megaphoneCanBeUsedStore || $userIsAdminStore;
+    }
+);
+export const mapMenuVisibleStore = derived(
+    [mapEditorMenuVisibleStore, backOfficeMenuVisibleStore, globalMessageVisibleStore],
+    ([$mapEditorMenuVisibleStore, $backOfficeMenuVisibleStore, $globalMessageVisibleStore]) => {
+        return $mapEditorMenuVisibleStore || $backOfficeMenuVisibleStore || $globalMessageVisibleStore;
+    }
+);
+
+type Menus = "appMenu" | "profileMenu" | "burgerMenu" | "mapMenu";
+
+function createOpenedMenuStore() {
+    const openedMenuStore = writable<Menus | undefined>(undefined);
+    const { subscribe, set } = openedMenuStore;
+
+    return {
+        subscribe,
+        open(menu: Menus) {
+            set(menu);
+            activeSecondaryZoneActionBarStore.set(undefined);
+        },
+        close(menu: Menus) {
+            if (get({ subscribe }) === menu) {
+                set(undefined);
+            }
+        },
+        closeAll() {
+            set(undefined);
+        },
+        toggle(menu: Menus) {
+            if (get({ subscribe }) === menu) {
+                set(undefined);
+            } else {
+                set(menu);
+                activeSecondaryZoneActionBarStore.set(undefined);
+            }
+        },
+    };
+}
+
+export const openedMenuStore = createOpenedMenuStore();

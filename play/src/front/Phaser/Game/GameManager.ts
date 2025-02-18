@@ -1,15 +1,17 @@
 import { get } from "svelte/store";
+import * as Sentry from "@sentry/svelte";
 import { connectionManager } from "../../Connection/ConnectionManager";
 import { localUserStore } from "../../Connection/LocalUserStore";
 import type { Room } from "../../Connection/Room";
-import { helpCameraSettingsVisibleStore } from "../../Stores/HelpSettingsStore";
+import { showHelpCameraSettings } from "../../Stores/HelpSettingsStore";
 import {
+    availabilityStatusStore,
     requestedCameraDeviceIdStore,
     requestedCameraState,
     requestedMicrophoneDeviceIdStore,
     requestedMicrophoneState,
 } from "../../Stores/MediaStore";
-import { menuIconVisiblilityStore } from "../../Stores/MenuStore";
+import { menuIconVisiblilityStore, userIsConnected } from "../../Stores/MenuStore";
 import { EnableCameraSceneName } from "../Login/EnableCameraScene";
 import { LoginSceneName } from "../Login/LoginScene";
 import { SelectCharacterSceneName } from "../Login/SelectCharacterScene";
@@ -19,6 +21,12 @@ import { myCameraStore } from "../../Stores/MyMediaStore";
 import { SelectCompanionSceneName } from "../Login/SelectCompanionScene";
 import { errorScreenStore } from "../../Stores/ErrorScreenStore";
 import { hasCapability } from "../../Connection/Capabilities";
+import { ChatConnectionInterface } from "../../Chat/Connection/ChatConnection";
+import { ENABLE_CHAT, MATRIX_PUBLIC_URI } from "../../Enum/EnvironmentVariable";
+import { MatrixClientWrapper } from "../../Chat/Connection/Matrix/MatrixClientWrapper";
+import { MatrixChatConnection } from "../../Chat/Connection/Matrix/MatrixChatConnection";
+import { VoidChatConnection } from "../../Chat/Connection/VoidChatConnection";
+import { isMatrixChatEnabledStore } from "../../Stores/ChatStore";
 import { GameScene } from "./GameScene";
 
 /**
@@ -33,6 +41,10 @@ export class GameManager {
     // Note: this scenePlugin is the scenePlugin of the EntryScene. We should always provide a key in methods called on this scenePlugin.
     private scenePlugin!: Phaser.Scenes.ScenePlugin;
     private visitCardUrl: string | null = null;
+    private matrixServerUrl: string | undefined = undefined;
+    private chatConnectionPromise: Promise<ChatConnectionInterface> | undefined;
+    private matrixClientWrapper: MatrixClientWrapper | undefined;
+    private _chatConnection: ChatConnectionInterface | undefined;
 
     constructor() {
         this.playerName = localUserStore.getName();
@@ -162,7 +174,7 @@ export class GameManager {
             !localUserStore.getHelpCameraSettingsShown() &&
             (!get(requestedMicrophoneState) || !get(requestedCameraState))
         ) {
-            helpCameraSettingsVisibleStore.set(true);
+            showHelpCameraSettings();
             localUserStore.setHelpCameraSettingsShown();
         }
     }
@@ -211,7 +223,7 @@ export class GameManager {
             this.currentGameSceneName == undefined ? "default" : this.currentGameSceneName
         );
         if (!(gameScene instanceof GameScene)) {
-            throw new Error("Not the Game Scene");
+            throw new GameSceneNotFoundError("Not the Game Scene");
         }
         return gameScene;
     }
@@ -219,6 +231,77 @@ export class GameManager {
     public get currentStartedRoom() {
         return this.startRoom;
     }
+
+    public setMatrixServerUrl(matrixServerUrl: string | undefined) {
+        this.matrixServerUrl = matrixServerUrl;
+    }
+
+    public getMatrixServerUrl(): string | undefined {
+        return this.matrixServerUrl;
+    }
+
+    public async getChatConnection(): Promise<ChatConnectionInterface> {
+        if (this.chatConnectionPromise) {
+            return this.chatConnectionPromise;
+        }
+
+        const matrixServerUrl = this.getMatrixServerUrl() ?? MATRIX_PUBLIC_URI;
+        if (matrixServerUrl && ENABLE_CHAT && this.getCurrentGameScene().room.isChatEnabled && get(userIsConnected)) {
+            this.matrixClientWrapper = new MatrixClientWrapper(matrixServerUrl, localUserStore);
+            const matrixClientPromise = this.matrixClientWrapper.initMatrixClient();
+
+            const matrixChatConnection = new MatrixChatConnection(matrixClientPromise, availabilityStatusStore);
+            this._chatConnection = matrixChatConnection;
+
+            this.chatConnectionPromise = matrixChatConnection.init().then(() => matrixChatConnection);
+            isMatrixChatEnabledStore.set(true);
+
+            return this.chatConnectionPromise;
+        } else {
+            // No matrix connection? Let's fill the gap with a "void" object
+            this._chatConnection = new VoidChatConnection();
+            isMatrixChatEnabledStore.set(false);
+            return this._chatConnection;
+        }
+    }
+    get chatConnection(): ChatConnectionInterface {
+        if (!this._chatConnection) {
+            throw new Error("_chatConnection not yet initialized");
+        }
+        return this._chatConnection;
+    }
+
+    /**
+     * Performs all cleanup actions specific to someone logging out.
+     * Currently, this logs out from the Matrix client.
+     */
+    public async logout(): Promise<void> {
+        if (this._chatConnection) {
+            try {
+                this._chatConnection.clearListener();
+                await this._chatConnection.destroy();
+                this.clearChatDataFromLocalStorage();
+                this._chatConnection = undefined;
+                this.chatConnectionPromise = undefined;
+            } catch (e) {
+                console.error("Chat connection not closed properly : ", e);
+                Sentry.captureException(e);
+            }
+        }
+    }
+
+    private clearChatDataFromLocalStorage(): void {
+        localUserStore.setMatrixLoginToken(null);
+        localUserStore.setMatrixUserId(null);
+        localUserStore.setMatrixAccessToken(null);
+        localUserStore.setMatrixRefreshToken(null);
+    }
 }
 
 export const gameManager = new GameManager();
+
+export class GameSceneNotFoundError extends Error {
+    constructor(message: string) {
+        super(message);
+    }
+}

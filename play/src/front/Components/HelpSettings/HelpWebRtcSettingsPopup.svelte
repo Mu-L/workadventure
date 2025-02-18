@@ -1,8 +1,12 @@
 <script lang="ts">
     import { fly } from "svelte/transition";
+    import { onMount } from "svelte";
     import { helpWebRtcSettingsVisibleStore } from "../../Stores/HelpSettingsStore";
     import { LL } from "../../../i18n/i18n-svelte";
     import { gameManager } from "../../Phaser/Game/GameManager";
+    import { warningMessageStore } from "../../Stores/ErrorStore";
+
+    let notAskAgain = false;
 
     function refresh() {
         window.location.reload();
@@ -17,25 +21,38 @@
         return gameManager.currentStartedRoom.backgroundColor;
     }
 
+    function onChangesAskAgain() {
+        localStorage.setItem("notAskAgainHelpWebRtcSettingsPopup", `${notAskAgain}`);
+    }
+
+    onMount(() => {
+        const notAskAgainValue = localStorage.getItem("notAskAgainHelpWebRtcSettingsPopup");
+        if (notAskAgainValue === "true") {
+            // Close this popup but show warning message
+            warningMessageStore.addWarningMessage($LL.camera.webrtc.content());
+            close();
+        }
+    });
+
     /* eslint-disable svelte/no-at-html-tags */
 </script>
 
 <form
-    class="helpCameraSettings tw-z-[600] tw-bg-dark-purple tw-rounded tw-text-white tw-self-center tw-p-3 tw-pointer-events-auto tw-flex tw-flex-col tw-m-auto tw-w-full md:tw-w-2/3 2xl:tw-w-1/4 tw-text-sm md:tw-text-base"
+    class="helpCameraSettings z-[600] bg-dark-purple rounded text-white self-center p-3 pointer-events-auto flex flex-col m-auto w-full md:w-2/3 2xl:w-1/4 text-sm md:text-base"
     style={getBackgroundColor() ? `background-color: ${getBackgroundColor()};` : ""}
     on:submit|preventDefault={close}
     transition:fly={{ y: -50, duration: 500 }}
 >
-    <section class="tw-mb-0">
+    <section class="mb-0">
         {#if $helpWebRtcSettingsVisibleStore === "error"}
-            <h2 class="tw-mb-2">{$LL.camera.webrtc.title()}</h2>
+            <h2 class="mb-2">{$LL.camera.webrtc.title()}</h2>
         {:else if $helpWebRtcSettingsVisibleStore === "pending"}
-            <h2 class="tw-mb-2">
+            <h2 class="mb-2">
                 <div class="text-left">
                     <div role="status">
                         <svg
                             aria-hidden="true"
-                            class="tw-inline tw-w-7 tw-h-7 tw-mr-2 tw-text-gray tw-animate-spin tw-dark:tw-text-gray tw-fill-light-blue"
+                            class="inline w-7 h-7 mr-2 text-gray animate-spin dark:text-gray fill-light-blue"
                             viewBox="0 0 100 101"
                             fill="none"
                             xmlns="http://www.w3.org/2000/svg"
@@ -63,7 +80,15 @@
             <!--<li>{@html $LL.camera.webrtc.solutionNetworkAdmin()}<a href="" target="_blank">{$LL.camera.webrtc.preparingYouNetworkGuide()}</a></li>-->
         </ul>
     </section>
-    <section class="tw-flex tw-row tw-justify-center">
+    <section class="flex row justify-center content-center items-center text-xs">
+        <input type="checkbox" id="askagain" class="mx-1" bind:checked={notAskAgain} on:change={onChangesAskAgain} />
+        <label for="askagain" class="m-0 mx-1">{$LL.camera.webrtc.solutionVpnNotAskAgain()}</label>
+    </section>
+    <section class="flex row justify-center content-center items-center text-xs">
+        <input type="checkbox" id="askagain" class="mx-1" bind:checked={notAskAgain} on:change={onChangesAskAgain} />
+        <label for="askagain" class="m-0 mx-1">{$LL.camera.webrtc.solutionVpnNotAskAgain()}</label>
+    </section>
+    <section class="flex row justify-center">
         <button class="light" on:click|preventDefault={refresh}>{$LL.camera.webrtc.refresh()}</button>
         <button type="submit" class="outline" on:click|preventDefault={close}>{$LL.camera.webrtc.continue()}</button>
     </section>

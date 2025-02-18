@@ -12,18 +12,14 @@ const menu: DeepPartial<Translation["menu"]> = {
             userlist: "Lista de usuarios",
             openEmoji: "Abrir emoji emergente seleccionado",
             closeEmoji: "Cerrar el menú de emojis",
+            mobile: "Abrir menú móvil",
+            calendar: "Abrir calendario",
         },
     },
     visitCard: {
         close: "Cerrar",
     },
     profile: {
-        edit: {
-            name: "Editar su nombre",
-            woka: "Editar su WOKA",
-            companion: "Editar su compañero",
-            camera: "Editar su cámara",
-        },
         login: "Iniciar sesión",
         logout: "Cerrar sesión",
     },

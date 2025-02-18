@@ -1,26 +1,25 @@
 import *  as fs from "fs";
 import { APIResponse, expect, test } from '@playwright/test';
-import { login } from './utils/roles';
 import {createZipFromDirectory} from "./utils/zip";
-import { gotoWait200 } from "./utils/containers";
 import {RENDERER_MODE} from "./utils/environment";
 import {map_storage_url, maps_domain} from "./utils/urls";
+import { getPage} from "./utils/auth";
+import {isMobile} from "./utils/isMobile";
 
 test.use({
     baseURL: map_storage_url,
 })
 
 test.describe('Map-storage Upload API', () => {
-    test('users are asked to reconnect when a map is updated', async ({
-        request, page, browser
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
+    test.beforeEach(async ({page}) => {
+        if (isMobile(page)) {
             //eslint-disable-next-line playwright/no-skipped-test
             test.skip();
             return;
         }
-
+    });
+    test('users are asked to reconnect when a map is updated',
+        async ({ request, browser }) => {
         const uploadFile1 = await request.put("map1.wam", {
             multipart: {
                 file: {
@@ -54,14 +53,8 @@ test.describe('Map-storage Upload API', () => {
             }
         });
         await expect(uploadFile2.ok()).toBeTruthy();
-
-        await gotoWait200(page, `/~/map1.wam?phaserMode=${RENDERER_MODE}`);
-        await login(page, 'Alice');
-
-        const newBrowser = await browser.browserType().launch();
-        const page2 = await newBrowser.newPage();
-        await gotoWait200(page2, `/~/map2.wam?phaserMode=${RENDERER_MODE}`);
-        await login(page2, 'Bob');
+        const page = await getPage(browser, 'Alice', `/~/map1.wam?phaserMode=${RENDERER_MODE}`);
+        const page2 = await getPage(browser, 'Bob', `/~/map2.wam?phaserMode=${RENDERER_MODE}`);
 
         // Let's trigger a reload of map 1 only
         const uploadFile3 = await request.put("map1.wam", {
@@ -84,18 +77,13 @@ test.describe('Map-storage Upload API', () => {
         // Now let's check the user in map1 did reload, but not on map2
         await expect((await (page.locator(".test-class")).innerText())).toEqual("New version of map detected. Refresh needed");
         await expect(page2.getByText("New version of map detected. Refresh needed")).toBeHidden();
+        await page2.close();
+        await page2.context().close();
+        await page.close();
+        await page.context().close();
     });
 
-    test('can upload ZIP file', async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test('can upload ZIP file', async ({ request }) => {
         createZipFromDirectory("./assets/file1/", "./assets/file1.zip");
         const uploadFile1 = await request.post("upload", {
             multipart: {
@@ -146,16 +134,7 @@ test.describe('Map-storage Upload API', () => {
         await expect(await accessFile5.text()).toContain("world");
     });
 
-    test('not authenticated requests are rejected', async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test('not authenticated requests are rejected', async ({ request }) => {
         createZipFromDirectory("./assets/file1/", "./assets/file1.zip");
         const uploadFile1 = await request.post(new URL("upload", (process.env.MAP_STORAGE_PROTOCOL ?? "http") + "://bad:credentials@" + (process.env.MAP_STORAGE_ENDPOINT ?? 'map-storage.workadventure.localhost')).toString(), {
             multipart: {
@@ -166,16 +145,7 @@ test.describe('Map-storage Upload API', () => {
         await expect(uploadFile1.status()).toBe(401);
     });
 
-    test('download', async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test('download', async ({ request }) => {
         createZipFromDirectory("./assets/file2/", "./assets/file2.zip");
         // upload zip (file2.zip), download the "subdir" that contains only one file, reupload the subdir in "/bar", access the file
         const uploadFile1 = await request.post("upload", {
@@ -210,16 +180,7 @@ test.describe('Map-storage Upload API', () => {
 
     });
 
-    test('create new .wam file for every .tmj file', async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test('create new .wam file for every .tmj file', async ({ request }) => {
         createZipFromDirectory("./assets/create-wam-files/", "./assets/create-wam-files.zip");
         const uploadTmjFiles = await request.post("upload", {
             multipart: {
@@ -243,16 +204,7 @@ test.describe('Map-storage Upload API', () => {
     });
 
     // Test marked as local because CDN might cache the old wam file and serve it back.
-    test('old .wam file is replaced by new .wam file @local', async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test('old .wam file is replaced by new .wam file @local', async ({ request }) => {
         createZipFromDirectory("./assets/wam-files-base/", "./assets/wam-files-base.zip");
         // upload zip (wam-files-base.zip) to act as our current storage state
         const uploadWamFileBase = await request.post("upload", {
@@ -282,16 +234,7 @@ test.describe('Map-storage Upload API', () => {
         await expect(await accessFile1.text()).toContain('"version":"1.0.0"');
     });
 
-    test('old .wam file is removed along with its .tmj file', async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test('old .wam file is removed along with its .tmj file', async ({ request }) => {
         createZipFromDirectory("./assets/wam-files-base/", "./assets/wam-files-base.zip");
         // upload zip (wam-files-base.zip) to act as our current storage state
         const uploadWamFileBase = await request.post("upload", {
@@ -324,16 +267,8 @@ test.describe('Map-storage Upload API', () => {
         await expect(accessFile3.ok()).toBeTruthy();
     });
 
-    test('new .tmj file with the same name is uploaded, old .wam file persists', async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test('new .tmj file with the same name is uploaded, old .wam file persists',
+        async ({ request }) => {
         createZipFromDirectory("./assets/wam-files-base/", "./assets/wam-files-base.zip");
         // upload zip (wam-files-base.zip) to act as our current storage state
         const uploadWamFileBase = await request.post("upload", {
@@ -363,16 +298,7 @@ test.describe('Map-storage Upload API', () => {
         await expect(await accessFile2.text()).toContain('"version":"2.0.0"');
     });
 
-    test('cache-control header', async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test('cache-control header', async ({ request }) => {
         createZipFromDirectory("./assets/cache-control/", "./assets/cache-control.zip");
         // Let's upload the cache-control.zip
         // It contains 2 files: immutable.a45b7e8f.js and normal-file.js.
@@ -396,16 +322,7 @@ test.describe('Map-storage Upload API', () => {
         await expect(accessCacheControlFile.headers()['cache-control']).toContain("immutable");
     });
 
-    test("get list of maps", async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test("get list of maps", async ({ request }) => {
         createZipFromDirectory("./assets/file1/", "./assets/file1.zip");
         const uploadFile = await request.post("upload", {
             multipart: {
@@ -442,16 +359,7 @@ test.describe('Map-storage Upload API', () => {
         await expect(Object.keys(maps["maps"])).toHaveLength(1);
     });
 
-    test("delete the root folder", async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test("delete the root folder", async ({ request }) => {
         createZipFromDirectory("./assets/file1/", "./assets/file1.zip");
         const uploadFileToDir = await request.post("upload", {
             multipart: {
@@ -475,48 +383,39 @@ test.describe('Map-storage Upload API', () => {
         await expect(Object.keys(maps["maps"])).toHaveLength(0);
     });
 
-    test("delete a folder", async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
+    test("delete a folder", async ({ request }) => {
+        const folderName = "toDelete" ;
+        const fileName = "map.wam" ;
+        const filePath = `${folderName}/${fileName}`;
 
         createZipFromDirectory("./assets/file1/", "./assets/file1.zip");
         const uploadFileToDir = await request.post("upload", {
             multipart: {
                 file: fs.createReadStream("./assets/file1.zip"),
-                directory: "/toDelete"
+                directory: `/${folderName}`
             }
         });
+
         await expect(uploadFileToDir.ok()).toBeTruthy();
 
         let listOfMaps = await request.get("maps");
         let maps = await listOfMaps.json();
-        await expect(maps["maps"]["toDelete/map.wam"]).toBeDefined();
+        await expect(maps["maps"][filePath]).toBeDefined();
 
-        const deleteRoot = await request.delete(`toDelete`);
+
+
+        const deleteRoot = await request.delete(folderName);
 
         await expect(deleteRoot.status() === 204).toBeTruthy();
 
         listOfMaps = await request.get("maps");
         maps = await listOfMaps.json();
-        await expect(maps["maps"]).toEqual({});
+        for (const key in maps["maps"]) {
+            await expect(key).not.toContain("toDelete");
+        }
     });
 
-    test("move a folder", async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test("move a folder", async ({ request }) => {
         createZipFromDirectory("./assets/file1/", "./assets/file1.zip");
         const uploadFileToDir = await request.post("upload", {
             multipart: {
@@ -545,16 +444,7 @@ test.describe('Map-storage Upload API', () => {
         await expect(maps["maps"]["toMove/map.wam"]).toBeUndefined();
     });
 
-    test("copy a folder", async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test("copy a folder", async ({ request }) => {
         createZipFromDirectory("./assets/file1/", "./assets/file1.zip");
         const uploadFileToDir = await request.post("upload", {
             multipart: {
@@ -583,16 +473,7 @@ test.describe('Map-storage Upload API', () => {
         await expect(maps["maps"]["copied/map.wam"]).toBeDefined();
     });
 
-    test('fails on invalid maps', async ({
-        request,
-    }, {  project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test('fails on invalid maps', async ({ request }) => {
         createZipFromDirectory("./assets/missing-image/", "./assets/missing-image.zip");
         const uploadFile1 = await request.post("upload", {
             multipart: {
@@ -603,16 +484,7 @@ test.describe('Map-storage Upload API', () => {
         await expect((await uploadFile1.json())['MissingImage.tmj']['tilesets'][0]['type']).toBe("error");
     });
 
-    test('fails on JSON extension', async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test('fails on JSON extension', async ({ request }) => {
         createZipFromDirectory("./assets/json-map/", "./assets/json-map.zip");
         const uploadFile1 = await request.post("upload", {
             multipart: {
@@ -623,16 +495,7 @@ test.describe('Map-storage Upload API', () => {
         await expect((await uploadFile1.json())['map.json']['map'][0]['message']).toBe('Invalid file extension. Maps should end with the ".tmj" extension.');
     });
 
-    test('upload / patch / delete single file @local', async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test('upload / patch / delete single file @local', async ({ request }) => {
         const uploadFile1 = await request.put("single-map.wam", {
             multipart: {
                 file: {
@@ -683,16 +546,7 @@ test.describe('Map-storage Upload API', () => {
 
     });
 
-    test('special characters support', async ({
-        request,
-    }, { project }) => {
-        // Skip test for mobile device
-        if(project.name === "mobilechromium") {
-            //eslint-disable-next-line playwright/no-skipped-test
-            test.skip();
-            return;
-        }
-
+    test('special characters support', async ({ request }) => {
         createZipFromDirectory("./assets/special_characters/", "./assets/special_characters.zip");
         const uploadFile1 = await request.post("upload", {
             multipart: {

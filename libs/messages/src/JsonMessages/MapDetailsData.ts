@@ -3,7 +3,6 @@ import { extendApi } from "@anatine/zod-openapi";
 import { isMetaTagFavicon } from "./MetaTagFavicon";
 import { isMetaTagManifestIcon } from "./MetaTagManifestIcon";
 import { OpidWokaNamePolicy } from "./OpidWokaNamePolicy";
-import { MucRoomDefinition } from "./MucRoomDefinition";
 
 const isBbbData = z.object({
     url: extendApi(z.string(), {
@@ -36,39 +35,6 @@ const isMapThirdPartyData = z.object({
     }),
     jitsi: extendApi(isJitsiData.nullable().optional(), {
         description: "Use these settings to override default Jitsi settings.",
-    }),
-    // The integration tool to use for the map
-    klaxoonToolActivated: extendApi(z.boolean().optional(), {
-        description: "Whether the klaxoon tool is activated or not on this room",
-        example: true,
-    }),
-    klaxoonToolClientId: extendApi(z.string().optional().nullable(), {
-        description: "The client id of the klaxoon tool",
-        example: "klaxoon-client-id",
-    }),
-    youtubeToolActivated: extendApi(z.boolean().optional(), {
-        description: "Whether the youtube tool is activated or not on this room",
-        example: true,
-    }),
-    googleDriveToolActivated: extendApi(z.boolean().optional(), {
-        description: "Whether the google drive tool is activated or not on this room",
-        example: true,
-    }),
-    googleDocsToolActivated: extendApi(z.boolean().optional(), {
-        description: "Whether the google docs tool is activated or not on this room",
-        example: true,
-    }),
-    googleSheetsToolActivated: extendApi(z.boolean().optional(), {
-        description: "Whether the google sheets tool is activated or not on this room",
-        example: true,
-    }),
-    googleSlidesToolActivated: extendApi(z.boolean().optional(), {
-        description: "Whether the google slides tool is activated or not on this room",
-        example: true,
-    }),
-    eraserToolActivated: extendApi(z.boolean().optional(), {
-        description: "Whether the eraser tool is activated or not on this room",
-        example: true,
     }),
 });
 
@@ -170,16 +136,9 @@ export const isMapDetailsData = z.object({
         description: 'The group this room is part of (maps the notion of "world" in WorkAdventure SAAS)',
         example: "myorg/myworld",
     }),
-    mucRooms: extendApi(MucRoomDefinition.array().nullable(), {
-        description: "The MUC room is a room of message",
-    }),
     contactPage: extendApi(z.string().nullable().optional(), {
         description: "The URL to the contact page",
         example: "https://mycompany.com/contact-us",
-    }),
-    iframeAuthentication: extendApi(z.string().nullable().optional(), {
-        description: "The URL of the authentication Iframe",
-        example: "https://mycompany.com/authc",
     }),
     opidLogoutRedirectUrl: extendApi(z.string().nullable().optional(), {
         description: "The URL of the logout redirect",
@@ -277,7 +236,10 @@ export const isMapDetailsData = z.object({
     errorSceneLogo: extendApi(z.string().nullable().optional(), {
         description: "The URL of the error image to be used on the ErrorScene",
         example: "https://example.com/error_logo_login.png",
-    })
+    }),
+    modules: extendApi(z.array(z.string()).optional().nullable(), {
+        description: "List of external-modules to load",
+    }),
 });
 
 export type MapDetailsData = z.infer<typeof isMapDetailsData>;
