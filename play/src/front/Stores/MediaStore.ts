@@ -2,21 +2,24 @@ import type { Readable, Writable } from "svelte/store";
 import { derived, get, readable, writable } from "svelte/store";
 import deepEqual from "fast-deep-equal";
 import { AvailabilityStatus } from "@workadventure/messages";
+import * as Sentry from "@sentry/svelte";
 import { localUserStore } from "../Connection/LocalUserStore";
-import { HtmlUtils } from "../WebRtc/HtmlUtils";
 import { isIOS } from "../WebRtc/DeviceUtils";
 import { ObtainedMediaStreamConstraints } from "../WebRtc/P2PMessages/ConstraintMessage";
-import { isMediaBreakpointUp } from "../Utils/BreakpointsUtils";
 import { SoundMeter } from "../Phaser/Components/SoundMeter";
-import { userMovingStore } from "./GameStore";
+import { RequestedStatus } from "../Rules/StatusRules/statusRules";
+import { statusChanger } from "../Components/ActionBar/AvailabilityStatus/statusChanger";
+import { MediaStreamConstraintsError } from "./Errors/MediaStreamConstraintsError";
 import { BrowserTooOldError } from "./Errors/BrowserTooOldError";
 import { errorStore } from "./ErrorStore";
 import { WebviewOnOldIOS } from "./Errors/WebviewOnOldIOS";
-import { inExternalServiceStore, myCameraStore, myMicrophoneStore, proximityMeetingStore } from "./MyMediaStore";
+
 import { peerStore } from "./PeerStore";
-import { privacyShutdownStore } from "./PrivacyShutdownStore";
-import { MediaStreamConstraintsError } from "./Errors/MediaStreamConstraintsError";
 import { createSilentStore } from "./SilentStore";
+import { privacyShutdownStore } from "./PrivacyShutdownStore";
+import { inExternalServiceStore, myCameraStore, myMicrophoneStore, proximityMeetingStore } from "./MyMediaStore";
+import { userMovingStore } from "./GameStore";
+import { hideHelpCameraSettings } from "./HelpSettingsStore";
 
 /**
  * A store that contains the camera state requested by the user (on or off).
@@ -179,39 +182,7 @@ const deviceChanged10SecondsAgoStore = readable(false, function start(set) {
 /**
  * A store containing whether the mouse is getting close the bottom right corner.
  */
-const mouseInCameraTriggerArea = readable(false, function start(set) {
-    let lastInTriggerArea = false;
-    const gameDiv = HtmlUtils.getElementByIdOrFail<HTMLDivElement>("game");
-
-    const detectInBottomRight = (event: MouseEvent) => {
-        const isSmallScreen = isMediaBreakpointUp("md");
-        const rect = gameDiv.getBoundingClientRect();
-
-        if (!isSmallScreen) {
-            const inBottomRight =
-                event.x - rect.left > (rect.width * 3) / 4 && event.y - rect.top > (rect.height * 3) / 4; //Mouse's x is further than 3/4 of the width and lower than 3/4 starting from top
-            if (inBottomRight !== lastInTriggerArea) {
-                lastInTriggerArea = inBottomRight;
-                set(inBottomRight);
-            }
-        } else {
-            const inTopCenter =
-                event.x - rect.left > rect.width / 4 &&
-                event.x + rect.left < (rect.width * 3) / 4 &&
-                event.y - rect.top < rect.height / 4;
-            if (inTopCenter !== lastInTriggerArea) {
-                lastInTriggerArea = inTopCenter;
-                set(inTopCenter);
-            }
-        }
-    };
-
-    document.addEventListener("mousemove", detectInBottomRight);
-
-    return function stop() {
-        document.removeEventListener("mousemove", detectInBottomRight);
-    };
-});
+export const mouseInCameraTriggerArea = writable(false);
 
 export const cameraNoEnergySavingStore = writable<boolean>(false);
 
@@ -324,6 +295,8 @@ export const inJitsiStore = writable(false);
 export const inBbbStore = writable(false);
 export const isSpeakerStore = writable(false);
 
+export const requestedStatusStore: Writable<RequestedStatus | null> = writable(localUserStore.getRequestedStatus());
+
 export const inCowebsiteZone = derived(
     [inJitsiStore, inBbbStore, inOpenWebsite],
     ([$inJitsiStore, $inBbbStore, $inOpenWebsite]) => {
@@ -335,18 +308,47 @@ export const inCowebsiteZone = derived(
 export const silentStore = createSilentStore();
 
 export const availabilityStatusStore = derived(
-    [inJitsiStore, inBbbStore, silentStore, privacyShutdownStore, proximityMeetingStore, isSpeakerStore],
-    ([$inJitsiStore, $inBbbStore, $silentStore, $privacyShutdownStore, $proximityMeetingStore, $isSpeakerStore]) => {
+    [
+        inJitsiStore,
+        inBbbStore,
+        silentStore,
+        privacyShutdownStore,
+        proximityMeetingStore,
+        isSpeakerStore,
+        requestedStatusStore,
+    ],
+    ([
+        $inJitsiStore,
+        $inBbbStore,
+        $silentStore,
+        $privacyShutdownStore,
+        $proximityMeetingStore,
+        $isSpeakerStore,
+        $requestedStatusStore,
+    ]) => {
         if ($inJitsiStore) return AvailabilityStatus.JITSI;
         if ($inBbbStore) return AvailabilityStatus.BBB;
         if (!$proximityMeetingStore) return AvailabilityStatus.DENY_PROXIMITY_MEETING;
         if ($isSpeakerStore) return AvailabilityStatus.SPEAKER;
         if ($silentStore) return AvailabilityStatus.SILENT;
+        if ($requestedStatusStore) return $requestedStatusStore;
         if ($privacyShutdownStore) return AvailabilityStatus.AWAY;
+
         return AvailabilityStatus.ONLINE;
     },
     AvailabilityStatus.ONLINE
 );
+
+// This is a singleton so we can safely not ever unsubscribe from it.
+// eslint-disable-next-line svelte/no-ignored-unsubscribe
+availabilityStatusStore.subscribe((newStatus: AvailabilityStatus) => {
+    try {
+        statusChanger.changeStatusTo(newStatus);
+    } catch (e) {
+        console.error("Error while changing status", e);
+        Sentry.captureException(e);
+    }
+});
 
 let previousComputedVideoConstraint: boolean | MediaTrackConstraints = false;
 let previousComputedAudioConstraint: boolean | MediaTrackConstraints = false;
@@ -440,7 +442,10 @@ export const mediaStreamConstraintsStore = derived(
         if (
             $availabilityStatusStore === AvailabilityStatus.DENY_PROXIMITY_MEETING ||
             $availabilityStatusStore === AvailabilityStatus.SILENT ||
-            $availabilityStatusStore === AvailabilityStatus.SPEAKER
+            $availabilityStatusStore === AvailabilityStatus.SPEAKER ||
+            $availabilityStatusStore === AvailabilityStatus.DO_NOT_DISTURB ||
+            $availabilityStatusStore === AvailabilityStatus.BACK_IN_A_MOMENT ||
+            $availabilityStatusStore === AvailabilityStatus.BUSY
         ) {
             currentVideoConstraint = false;
             currentAudioConstraint = false;
@@ -477,7 +482,7 @@ export type LocalStreamStoreValue = StreamSuccessValue | StreamErrorValue;
 
 interface StreamSuccessValue {
     type: "success";
-    stream: MediaStream | null;
+    stream: MediaStream | undefined;
 }
 
 interface StreamErrorValue {
@@ -485,7 +490,7 @@ interface StreamErrorValue {
     error: Error;
 }
 
-let currentStream: MediaStream | null = null;
+let currentStream: MediaStream | undefined = undefined;
 let oldConstraints = { video: false, audio: false };
 
 // This promise is important to queue the calls to "getUserMedia"
@@ -496,7 +501,7 @@ let oldConstraints = { video: false, audio: false };
 let currentGetUserMediaPromise: Promise<MediaStream | undefined> = Promise.resolve(undefined);
 
 /**
- * A store containing the MediaStream object (or null if nothing requested, or Error if an error occurred)
+ * A store containing the MediaStream object (or undefined if nothing requested, or Error if an error occurred)
  */
 export const localStreamStore = derived<Readable<MediaStreamConstraints>, LocalStreamStoreValue>(
     mediaStreamConstraintsStore,
@@ -525,6 +530,8 @@ export const localStreamStore = derived<Readable<MediaStreamConstraints>, LocalS
                         if (currentStream.getAudioTracks().length > 0) {
                             usedMicrophoneDeviceIdStore.set(currentStream.getAudioTracks()[0]?.getSettings().deviceId);
                         }
+                        hideHelpCameraSettings();
+
                         return stream;
                     })
                     .catch((e) => {
@@ -594,11 +601,11 @@ export const localStreamStore = derived<Readable<MediaStreamConstraints>, LocalS
             }
         }
 
-        if (currentStream === null) {
+        if (currentStream === undefined) {
             // we need to assign a first value to the stream because getUserMedia is async
             set({
                 type: "success",
-                stream: null,
+                stream: undefined,
             });
         }
 
@@ -610,10 +617,10 @@ export const localStreamStore = derived<Readable<MediaStreamConstraints>, LocalS
                     currentStream.getTracks().forEach((t) => t.stop());
                 }
 
-                currentStream = null;
+                currentStream = undefined;
                 set({
                     type: "success",
-                    stream: null,
+                    stream: undefined,
                 });
                 return undefined;
             });
@@ -684,7 +691,7 @@ export const localVolumeStore = readable<number[] | undefined>(undefined, (set) 
         }
         const mediaStream = localStreamStoreValue.stream;
 
-        if (mediaStream === null || mediaStream.getAudioTracks().length <= 0) {
+        if (mediaStream === undefined || mediaStream.getAudioTracks().length <= 0) {
             set(undefined);
             return;
         }
@@ -723,6 +730,40 @@ export const deviceListStore = readable<MediaDeviceInfo[] | undefined>(undefined
         navigator.mediaDevices
             .enumerateDevices()
             .then((mediaDeviceInfos) => {
+                // check if the new list has the prefered device
+                const preferredVideoInputDevice = localUserStore.getPreferredVideoInputDevice();
+                const preferredAudioInputDevice = localUserStore.getPreferredAudioInputDevice();
+                const preferredSpeakerDevice = localUserStore.getSpeakerDeviceId();
+
+                if (
+                    preferredVideoInputDevice &&
+                    mediaDeviceInfos.find((device) => device.deviceId === preferredVideoInputDevice)
+                ) {
+                    requestedCameraDeviceIdStore.set(preferredVideoInputDevice);
+                }
+                if (
+                    preferredAudioInputDevice &&
+                    mediaDeviceInfos.find((device) => device.deviceId === preferredAudioInputDevice)
+                ) {
+                    requestedMicrophoneDeviceIdStore.set(preferredAudioInputDevice);
+                }
+                if (
+                    preferredSpeakerDevice &&
+                    mediaDeviceInfos.find((device) => device.deviceId === preferredSpeakerDevice)
+                ) {
+                    speakerSelectedStore.set(preferredSpeakerDevice);
+                }
+
+                const actualsMediaDevices = get(deviceListStore);
+                // get all media that not exist in the list
+                if (actualsMediaDevices != undefined) {
+                    // set the last new media devices detected
+                    const newDevices = mediaDeviceInfos.filter(
+                        (device) => actualsMediaDevices.find((d) => d.deviceId === device.deviceId) == undefined
+                    );
+                    lastNewMediaDeviceDetectedStore.set(newDevices);
+                }
+
                 set(mediaDeviceInfos);
                 devicesNotLoaded.set(false);
             })
@@ -734,7 +775,7 @@ export const deviceListStore = readable<MediaDeviceInfo[] | undefined>(undefined
     };
 
     const unsubscribe = localStreamStore.subscribe((streamResult) => {
-        if (streamResult.type === "success" && streamResult.stream !== null) {
+        if (streamResult.type === "success" && streamResult.stream !== undefined) {
             if (deviceListCanBeQueried === false) {
                 queryDeviceList();
                 deviceListCanBeQueried = true;
@@ -914,3 +955,5 @@ function createVideoBandwidthStore() {
 }
 
 export const videoBandwidthStore = createVideoBandwidthStore();
+
+export const lastNewMediaDeviceDetectedStore = writable<MediaDeviceInfo[]>([]);

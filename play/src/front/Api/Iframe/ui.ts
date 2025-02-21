@@ -9,6 +9,7 @@ import { apiCallback } from "./registeredCallbacks";
 import type { ButtonClickedCallback, ButtonDescriptor } from "./Ui/ButtonDescriptor";
 import { Popup } from "./Ui/Popup";
 import { ActionMessage } from "./Ui/ActionMessage";
+import { PlayerMessage } from "./Ui/PlayerMessage";
 import { Menu } from "./Ui/Menu";
 import type { UIWebsiteCommands } from "./Ui/UIWebsite";
 import website from "./Ui/UIWebsite";
@@ -28,6 +29,7 @@ const popupCallbacks: Map<number, Map<number, ButtonClickedCallback>> = new Map<
 const menus: Map<string, Menu> = new Map<string, Menu>();
 const menuCallbacks: Map<string, (command: string) => void> = new Map();
 const actionMessages = new Map<string, ActionMessage>();
+const playerMessages = new Map<string, PlayerMessage>();
 
 interface MenuDescriptor {
     callback?: (commandDescriptor: string) => void;
@@ -37,6 +39,10 @@ interface MenuDescriptor {
      * A unique technical key identifying this menu
      */
     key?: string;
+    /**
+     * The "allow" attribute of the iframe tag.
+     */
+    allow?: string;
 }
 
 export type MenuOptions = RequireOnlyOne<MenuDescriptor, "callback" | "iframe">;
@@ -44,6 +50,12 @@ export type MenuOptions = RequireOnlyOne<MenuDescriptor, "callback" | "iframe">;
 export interface ActionMessageOptions {
     message: string;
     type?: "message" | "warning";
+    callback: () => void;
+}
+
+export interface PlayerMessageOptions {
+    message: string;
+    type?: "message";
     callback: () => void;
 }
 
@@ -113,6 +125,10 @@ export class WorkAdventureUiCommands extends IframeApiContribution<WorkAdventure
                 if (actionMessage) {
                     actionMessage.triggerCallback();
                 }
+                const playerMessage = playerMessages.get(event.uuid);
+                if (playerMessage) {
+                    playerMessage.triggerCallback();
+                }
             },
         }),
         apiCallback({
@@ -133,7 +149,7 @@ export class WorkAdventureUiCommands extends IframeApiContribution<WorkAdventure
 
     /**
      * Open a popup in front of the game.
-     * {@link https://workadventu.re/map-building/api-ui.md#opening-a-popup | Website documentation}
+     * {@link https://docs.workadventu.re/map-building/api-ui.md#opening-a-popup | Website documentation}
      *
      * @param {string} targetObject Targeted object name
      * @param {string} message Message to display
@@ -177,7 +193,7 @@ export class WorkAdventureUiCommands extends IframeApiContribution<WorkAdventure
 
     /**
      * Add a custom menu item containing the text commandDescriptor in the navbar of the menu. options attribute accepts an object.
-     * {@link https://workadventu.re/map-building/api-ui.md#add-custom-menu | Website documentation}
+     * {@link https://docs.workadventu.re/map-building/api-ui.md#add-custom-menu | Website documentation}
      *
      * @param {string} commandDescriptor Command description
      * @param {MenuOptions | ((commandDescriptor: string) => void)} options Manu options
@@ -190,6 +206,7 @@ export class WorkAdventureUiCommands extends IframeApiContribution<WorkAdventure
         if (typeof options === "function") {
             options = {
                 callback: options,
+                allow: undefined,
             };
         }
 
@@ -197,6 +214,7 @@ export class WorkAdventureUiCommands extends IframeApiContribution<WorkAdventure
             ...options,
             allowApi: options.allowApi === undefined ? options.iframe !== undefined : options.allowApi,
             key: options.key ?? v4(),
+            allow: options.allow,
         };
 
         const menu = new Menu(finalOptions.key);
@@ -210,6 +228,7 @@ export class WorkAdventureUiCommands extends IframeApiContribution<WorkAdventure
                     key: finalOptions.key,
                     options: {
                         allowApi: finalOptions.allowApi,
+                        allow: finalOptions.allow,
                     },
                 },
             });
@@ -277,7 +296,7 @@ export class WorkAdventureUiCommands extends IframeApiContribution<WorkAdventure
 
     /**
      * Displays a message at the bottom of the screen (that will disappear when space bar is pressed).
-     * {@link https://workadventu.re/map-building/api-ui.md#awaiting-user-confirmation-with-space-bar | Website documentation}
+     * {@link https://docs.workadventu.re/map-building/api-ui.md#awaiting-user-confirmation-with-space-bar | Website documentation}
      *
      * @param {ActionMessageOptions} actionMessageOptions Action options
      * @returns {ActionMessage} Trigger action message
@@ -288,6 +307,21 @@ export class WorkAdventureUiCommands extends IframeApiContribution<WorkAdventure
         });
         actionMessages.set(actionMessage.uuid, actionMessage);
         return actionMessage;
+    }
+
+    /**
+     * Displays a player message at the top of the user head (that will disappear when space bar is pressed).
+     * {@link https://docs.workadventu.re/map-building/api-ui.md#awaiting-user-confirmation-with-space-bar | Website documentation}
+     *
+     * @param {PlayerMessageOptions} playerMessageOptions player options
+     * @returns {PlayerMessage} Trigger player message
+     */
+    public displayPlayerMessage(playerMessageOptions: PlayerMessageOptions): PlayerMessage {
+        const playerMessage = new PlayerMessage(playerMessageOptions, () => {
+            playerMessages.delete(playerMessage.uuid);
+        });
+        playerMessages.set(playerMessage.uuid, playerMessage);
+        return playerMessage;
     }
 
     get website(): UIWebsiteCommands {

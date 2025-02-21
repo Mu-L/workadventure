@@ -11,18 +11,16 @@ const menu: BaseTranslation = {
             userlist: "User list",
             openEmoji: "Open emoji selected popup",
             closeEmoji: "Close emoji menu",
+            mobile: "Open mobile menu",
+            calendar: "Calendar",
+            todoList: "Todo list",
         },
     },
     visitCard: {
         close: "Close",
+        sendMessage: "Send message",
     },
     profile: {
-        edit: {
-            name: "Edit your name",
-            woka: "Edit your WOKA",
-            companion: "Edit your companion",
-            camera: "Edit your camera",
-        },
         login: "Sign in",
         logout: "Log out",
     },
@@ -53,13 +51,17 @@ const menu: BaseTranslation = {
         otherSettings: "Other settings",
         fullscreen: "Fullscreen",
         notifications: "Notifications",
-        chatSounds: "Sounds of chat",
+        chatSounds: "Chat sounds",
         cowebsiteTrigger: "Always ask before opening websites and Jitsi Meet rooms",
         ignoreFollowRequest: "Ignore requests to follow other users",
+        proximityDiscussionVolume: "Proximity discussion volume",
+        blockAudio: "Block ambient sounds and music",
+        disableAnimations: "Disable map tile animations",
     },
     invite: {
         description: "Share the link of the room!",
         copy: "Copy",
+        copied: "Copied",
         share: "Share",
         walkAutomaticallyToPosition: "Walk automatically to my position",
         selectEntryPoint: "Select an entry point",
@@ -107,6 +109,19 @@ const menu: BaseTranslation = {
             },
         },
     },
+    chat: {
+        matrixIDLabel: "Your Matrix ID",
+        settings: "Settings",
+        resetKeyStorageUpButtonLabel: "Reset your key storage",
+        resetKeyStorageConfirmationModal: {
+            title: "Key storage reset confirmation",
+            content: "You are about to reset the key storage. Are you sure?",
+            warning:
+                "Resetting the key storage will remove your current session and all trusted users. You could lose access to some past messages, and you will no longer be recognized as a trusted user. Make sure you fully understand the consequences of this action before proceeding.",
+            cancel: "Cancel",
+            continue: "Continue",
+        },
+    },
     sub: {
         profile: "Profile",
         settings: "Settings",
@@ -115,6 +130,8 @@ const menu: BaseTranslation = {
         globalMessages: "Global Messages",
         contact: "Contact",
         report: "Report Issues",
+        chat: "Chat",
+        help: "Help & tutorials",
     },
 };
 

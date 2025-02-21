@@ -9,13 +9,11 @@ import type {
     AvailabilityStatus,
     CharacterTextureMessage,
     CompanionTextureMessage,
-    MucRoomDefinition,
     BatchMessage,
     SpaceFilterMessage,
     SubMessage,
 } from "@workadventure/messages";
 import { PusherRoom } from "../PusherRoom";
-import { Space } from "../Space";
 import { Zone } from "../Zone";
 import { PointInterface } from "./PointInterface";
 import { ViewportInterface } from "./ViewportMessage";
@@ -34,7 +32,6 @@ export type SocketData = {
     roomId: string;
     userId?: number; // User Id served by the back
     userUuid: string; // Admin UUID
-    userJid: string;
     isLogged: boolean;
     ipAddress: string;
     name: string;
@@ -48,10 +45,7 @@ export type SocketData = {
     tags: string[];
     visitCardUrl: string | null;
     userRoomToken: string | undefined;
-    jabberId: string;
-    jabberPassword: string | undefined | null;
     activatedInviteUser: boolean | undefined;
-    mucRooms: Array<MucRoomDefinition>;
     applications?: Array<ApplicationDefinitionInterface> | null;
     canEdit: boolean;
     spaceUser: SpaceUser;
@@ -61,10 +55,9 @@ export type SocketData = {
     backConnection?: BackConnection;
     listenedZones: Set<Zone>;
     pusherRoom: PusherRoom | undefined;
-    spaces: Space[];
+    spaces: Set<string>;
     spacesFilters: Map<string, SpaceFilterMessage[]>;
-    cameraState?: boolean;
-    microphoneState?: boolean;
-    screenSharingState?: boolean;
-    megaphoneState?: boolean;
+    chatID?: string;
+    world: string;
+    currentChatRoomArea: string[];
 };

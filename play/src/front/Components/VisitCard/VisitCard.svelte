@@ -1,8 +1,12 @@
 <script lang="ts">
     import { fly } from "svelte/transition";
     import { onMount } from "svelte";
-    import { requestVisitCardsStore } from "../../Stores/GameStore";
+    import { get } from "svelte/store";
+    import { requestVisitCardsStore, selectedChatIDRemotePlayerStore } from "../../Stores/GameStore";
     import { LL } from "../../../i18n/i18n-svelte";
+    import { gameManager } from "../../Phaser/Game/GameManager";
+    import { openChatRoom } from "../../Chat/Utils";
+    import { IconLoader } from "@wa-icons";
 
     export let visitCardUrl: string;
     let w = "500px";
@@ -10,8 +14,18 @@
     let hidden = true;
     let cvIframe: HTMLIFrameElement;
 
+    const chatConnection = gameManager.chatConnection;
+    const selectPlayerChatID = get(selectedChatIDRemotePlayerStore);
+    const roomCreationInProgress = chatConnection.roomCreationInProgress;
+
     function closeCard() {
         requestVisitCardsStore.set(null);
+    }
+
+    function openChat() {
+        if (!selectPlayerChatID) return;
+        openChatRoom(selectPlayerChatID).catch((error) => console.error(error));
+        closeCard();
     }
 
     function handleIframeMessage(message: MessageEvent) {
@@ -31,6 +45,26 @@
     {#if hidden}
         <div class="loader" />
     {/if}
+    {#if !hidden}
+        <div class="buttonContainer flex flex-row-reverse gap-2">
+            <button class="light cursor-pointer px-3 mb-2 mr-0" data-testid="closeVisitCard" on:click={closeCard}
+                >{$LL.menu.visitCard.close()}</button
+            >
+            {#if selectPlayerChatID}
+                {#if !$roomCreationInProgress}
+                    <button
+                        class="light cursor-pointer px-3 mb-2 mr-0"
+                        data-testid="sendMessagefromVisitCardButton"
+                        on:click={openChat}>{$LL.menu.visitCard.sendMessage()}</button
+                    >
+                {:else}
+                    <button class="light cursor-pointer px-3 mb-2 mr-0" data-testid="sendMessagefromVisitCardButton">
+                        <IconLoader class="animate-spin" />
+                    </button>
+                {/if}
+            {/if}
+        </div>
+    {/if}
     <iframe
         title="visitCard"
         src={visitCardUrl}
@@ -39,11 +73,6 @@
         class:hidden
         bind:this={cvIframe}
     />
-    {#if !hidden}
-        <div class="buttonContainer">
-            <button class="nes-btn is-popUpElement" on:click={closeCard}>{$LL.menu.visitCard.close()}</button>
-        </div>
-    {/if}
 </section>
 
 <svelte:window on:message={handleIframeMessage} />

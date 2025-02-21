@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { PEER_SCREEN_SHARE_RECOMMENDED_BANDWIDTH, PEER_VIDEO_RECOMMENDED_BANDWIDTH } from "../Enum/EnvironmentVariable";
 import { arrayEmoji, Emoji } from "../Stores/Utils/emojiSchema";
+import { RequestedStatus } from "../Rules/StatusRules/statusRules";
+import { requestedStatusFactory } from "../Rules/StatusRules/StatusFactory/RequestedStatusFactory";
 import type { LocalUser } from "./LocalUser";
-import { areCharacterTexturesValid, isUserNameValid } from "./LocalUser";
+import { areCharacterTexturesValid, isUserNameValid } from "./LocalUserUtils";
 
 const playerNameKey = "playerName";
 const selectedPlayerKey = "selectedPlayer";
@@ -15,9 +17,11 @@ const audioPlayerVolumeKey = "audioVolume";
 const audioPlayerMuteKey = "audioMute";
 const helpCameraSettingsShown = "helpCameraSettingsShown";
 const fullscreenKey = "fullscreen";
+const blockAudio = "blockAudio";
 const forceCowebsiteTriggerKey = "forceCowebsiteTrigger";
 const ignoreFollowRequests = "ignoreFollowRequests";
 const decreaseAudioPlayerVolumeWhileTalking = "decreaseAudioPlayerVolumeWhileTalking";
+const disableAnimations = "disableAnimations";
 const lastRoomUrl = "lastRoomUrl";
 const authToken = "authToken";
 const notification = "notificationPermission";
@@ -30,6 +34,16 @@ const cameraPrivacySettings = "cameraPrivacySettings";
 const microphonePrivacySettings = "microphonePrivacySettings";
 const emojiFavorite = "emojiFavorite";
 const speakerDeviceId = "speakerDeviceId";
+const matrixUserId = "matrixUserId";
+const matrixAccessToken = "matrixAccessToken";
+const matrixAccessTokenExpireDate = "matrixAccessTokenExpireDate";
+const matrixRefreshToken = "matrixRefreshToken";
+const matrixDeviceId = "matrixDeviceId";
+const matrixLoginToken = "matrixLoginToken";
+const requestedStatus = "RequestedStatus";
+const matrixGuest = "matrixGuest";
+const volumeProximityDiscussion = "volumeProximityDiscussion";
+const foldersOpened = "foldersOpened";
 
 const JwtAuthToken = z
     .object({
@@ -38,6 +52,8 @@ const JwtAuthToken = z
     .partial();
 
 type JwtAuthToken = z.infer<typeof JwtAuthToken>;
+
+const FoldersOpenedSchema = z.union([z.null(), z.array(z.string()).transform((arr) => new Set(arr))]);
 
 interface PlayerVariable {
     value: undefined;
@@ -161,6 +177,13 @@ class LocalUserStore {
         return localStorage.getItem(fullscreenKey) === "true";
     }
 
+    setBlockAudio(value: boolean): void {
+        localStorage.setItem(blockAudio, value.toString());
+    }
+    getBlockAudio(): boolean {
+        return localStorage.getItem(blockAudio) === "true";
+    }
+
     setForceCowebsiteTrigger(value: boolean): void {
         localStorage.setItem(forceCowebsiteTriggerKey, value.toString());
     }
@@ -181,6 +204,13 @@ class LocalUserStore {
     }
     getDecreaseAudioPlayerVolumeWhileTalking(): boolean {
         return localStorage.getItem(decreaseAudioPlayerVolumeWhileTalking) === "true";
+    }
+
+    setDisableAnimations(value: boolean): void {
+        localStorage.setItem(disableAnimations, value.toString());
+    }
+    getDisableAnimations(): boolean {
+        return localStorage.getItem(disableAnimations) === "true";
     }
 
     async setLastRoomUrl(roomUrl: string): Promise<void> {
@@ -260,6 +290,41 @@ class LocalUserStore {
 
     getChatSounds(): boolean {
         return localStorage.getItem(chatSounds) !== "false";
+    }
+
+    private getFoldersOpened(): Set<string> {
+        const foldersStr = localStorage.getItem(foldersOpened);
+        if (!foldersStr) {
+            return new Set<string>();
+        }
+        try {
+            const parsed = FoldersOpenedSchema.parse(JSON.parse(foldersStr));
+            return parsed ?? new Set<string>();
+        } catch (e) {
+            console.warn("Error parsing folders opened from localStorage:", e);
+            localStorage.removeItem(foldersOpened);
+            return new Set<string>();
+        }
+    }
+
+    private setFoldersOpened(folders: Set<string>) {
+        localStorage.setItem(foldersOpened, JSON.stringify(Array.from(folders)));
+    }
+
+    hasFolderOpened(folderId: string): boolean {
+        return this.getFoldersOpened().has(folderId);
+    }
+
+    addFolderOpened(folderId: string) {
+        const folders = this.getFoldersOpened();
+        folders.add(folderId);
+        this.setFoldersOpened(folders);
+    }
+
+    removeFolderOpened(folderId: string) {
+        const folders = this.getFoldersOpened();
+        folders.delete(folderId);
+        this.setFoldersOpened(folders);
     }
 
     setPreferredVideoInputDevice(deviceId?: string) {
@@ -478,6 +543,118 @@ class LocalUserStore {
         }
 
         return parseInt(value);
+    }
+
+    getRequestedStatus(): RequestedStatus | null {
+        return requestedStatusFactory.createRequestedStatus(localStorage.getItem(requestedStatus));
+    }
+
+    setRequestedStatus(newStatus: RequestedStatus | null) {
+        localStorage.setItem(requestedStatus, String(newStatus));
+    }
+
+    getLastNotificationPermissionRequest(): string | null {
+        return localStorage.getItem("lastNotificationPermissionRequest");
+    }
+    setLastNotificationPermissionRequest() {
+        localStorage.setItem("lastNotificationPermissionRequest", new Date().toString());
+    }
+
+    setMatrixUserId(value: string | null) {
+        if (value !== null) {
+            localStorage.setItem(matrixUserId, value);
+        } else {
+            localStorage.removeItem(matrixUserId);
+        }
+    }
+
+    getMatrixUserId(): string | null {
+        return localStorage.getItem(matrixUserId);
+    }
+
+    setMatrixAccessToken(value: string | null) {
+        if (value !== null) {
+            localStorage.setItem(matrixAccessToken, value);
+        } else {
+            localStorage.removeItem(matrixAccessToken);
+        }
+    }
+
+    getMatrixAccessToken(): string | null {
+        return localStorage.getItem(matrixAccessToken);
+    }
+
+    setMatrixAccessTokenExpireDate(value: Date | null) {
+        if (value !== null) {
+            localStorage.setItem(matrixAccessTokenExpireDate, value.toString());
+        } else {
+            localStorage.removeItem(matrixAccessTokenExpireDate);
+        }
+    }
+
+    getMatrixAccessTokenExpireDate(): Date | null {
+        const value = localStorage.getItem(matrixAccessTokenExpireDate);
+        if (value === null) {
+            return null;
+        }
+        return new Date(value);
+    }
+
+    setMatrixRefreshToken(value: string | null) {
+        if (value !== null) {
+            localStorage.setItem(matrixRefreshToken, value);
+        } else {
+            localStorage.removeItem(matrixRefreshToken);
+        }
+    }
+
+    getMatrixRefreshToken(): string | null {
+        return localStorage.getItem(matrixRefreshToken);
+    }
+
+    setMatrixDeviceId(value: string | null, userUuid: string) {
+        if (value !== null) {
+            localStorage.setItem(matrixDeviceId + "_" + userUuid, value);
+        } else {
+            localStorage.removeItem(matrixDeviceId + "_" + userUuid);
+        }
+    }
+
+    getMatrixDeviceId(userUuid: string): string | null {
+        return localStorage.getItem(matrixDeviceId + "_" + userUuid) ?? "";
+    }
+
+    setMatrixLoginToken(value: string | null) {
+        if (value !== null) {
+            localStorage.setItem(matrixLoginToken, value);
+        } else {
+            localStorage.removeItem(matrixLoginToken);
+        }
+    }
+
+    getMatrixLoginToken() {
+        return localStorage.getItem(matrixLoginToken);
+    }
+
+    //TODO : Remove duplicate code (getMatrixUserId) and change matrix id to chatID in localStorage
+    getChatId(): string | null {
+        return localStorage.getItem(matrixUserId);
+    }
+
+    isGuest(): boolean {
+        return localStorage.getItem(matrixGuest) === "true";
+    }
+
+    setGuest(isGuest: boolean): void {
+        localStorage.setItem(matrixGuest, isGuest.toString());
+    }
+
+    getVolumeProximityDiscussion(): number {
+        return parseFloat(localStorage.getItem(volumeProximityDiscussion) || "1");
+    }
+
+    setVolumeProximityDiscussion(value: number): void {
+        localStorage.setItem(volumeProximityDiscussion, `${value}`);
     }
 }
 

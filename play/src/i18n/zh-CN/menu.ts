@@ -12,18 +12,14 @@ const menu: DeepPartial<Translation["menu"]> = {
             userlist: "用户名单",
             openEmoji: "打开表情符号选择弹出窗口",
             closeEmoji: "关闭表情符号菜单",
+            mobile: "打开移动菜单",
+            calendar: "打开日历",
         },
     },
     visitCard: {
         close: "关闭",
     },
     profile: {
-        edit: {
-            name: "编辑名字",
-            woka: "编辑 WOKA",
-            companion: "编辑伙伴",
-            camera: "摄像头设置",
-        },
         login: "登录",
         logout: "登出",
     },

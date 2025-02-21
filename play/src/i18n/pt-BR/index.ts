@@ -13,10 +13,10 @@ import report from "./report";
 import warning from "./warning";
 import emoji from "./emoji";
 import trigger from "./trigger";
-import muc from "./muc";
 import notification from "./notification";
 import actionbar from "./actionbar";
 import video from "./video";
+import form from "./form";
 
 const pt_BR = merge(en_US, {
     audio,
@@ -32,10 +32,10 @@ const pt_BR = merge(en_US, {
     warning,
     emoji,
     trigger,
-    muc,
     notification,
     actionbar,
     video,
+    form,
 });
 
 export default pt_BR;

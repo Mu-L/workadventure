@@ -1,4 +1,5 @@
 import Debug from "debug";
+import { TurnCredentialsAnswer } from "@workadventure/messages";
 import type { UserSimplePeerInterface } from "../../WebRtc/SimplePeer";
 import { STUN_SERVER, TURN_PASSWORD, TURN_SERVER, TURN_USER } from "../../Enum/EnvironmentVariable";
 import { helpWebRtcSettingsVisibleStore } from "../../Stores/HelpSettingsStore";
@@ -6,8 +7,8 @@ import { analyticsClient } from "../../Administration/AnalyticsClient";
 
 export const debug = Debug("CheckTurn");
 
-export function srcObject(node: HTMLVideoElement, stream: MediaStream | null) {
-    node.srcObject = stream;
+export function srcObject(node: HTMLVideoElement, stream: MediaStream | null | undefined) {
+    node.srcObject = stream ?? null;
     return {
         update(newStream: MediaStream) {
             if (node.srcObject != newStream) {
@@ -17,7 +18,7 @@ export function srcObject(node: HTMLVideoElement, stream: MediaStream | null) {
     };
 }
 
-export function getIceServersConfig(user: UserSimplePeerInterface): RTCIceServer[] {
+export function getIceServersConfig(user: TurnCredentialsAnswer): RTCIceServer[] {
     const config: RTCIceServer[] = [];
     if (STUN_SERVER) {
         config.push({

@@ -1,11 +1,11 @@
-import { Resolver } from "dns";
-import { promisify } from "util";
+import dnsPromises from "dns/promises";
 import path from "path";
 import ipaddr from "ipaddr.js";
 import axios from "axios";
 import { ITiledMap } from "@workadventure/tiled-map-type-guard";
 import { LocalUrlError } from "./LocalUrlError";
 import { WAMFileFormat } from "./types";
+import { wamFileMigration } from "./Migrations/WamFileMigration";
 
 class MapFetcher {
     async getMapUrl(
@@ -21,13 +21,7 @@ class MapFetcher {
             throw new Error("Both mapUrl and wamUrl are undefined. Can't get mapUrl.");
         }
         const mapPath = (await this.fetchWamFile(wamUrl, internalMapStorageUrl, stripPrefix)).mapUrl;
-        try {
-            new URL(mapPath);
-            return mapPath;
-        } catch (e) {
-            console.info("Map URL is not a valid URL, trying to normalize it", e);
-            return this.normalizeMapUrl(mapPath, wamUrl);
-        }
+        return new URL(mapPath, wamUrl).toString();
     }
 
     normalizeMapUrl(mapUrl: string, wamUrl: string): string {
@@ -39,12 +33,15 @@ class MapFetcher {
         internalMapStorageUrl: string | undefined,
         stripPrefix: string | undefined
     ): Promise<WAMFileFormat> {
-        const result = await this.fetchFile(wamUrl, true, true, internalMapStorageUrl, stripPrefix);
-        const parseResult = WAMFileFormat.safeParse(result.data);
-        if (!parseResult) {
-            throw new LocalUrlError(`Invalid wam file format for: ${wamUrl}`);
-        } else {
+        try {
+            const result = await this.fetchFile(wamUrl, true, true, internalMapStorageUrl, stripPrefix);
+            const parseResult = WAMFileFormat.safeParse(wamFileMigration.migrate(result.data));
+            if (!parseResult) {
+                throw new LocalUrlError(`Invalid wam file format for: ${wamUrl}`);
+            }
             return result.data as WAMFileFormat;
+        } catch {
+            throw new LocalUrlError(`Invalid wam file format for: ${wamUrl}`);
         }
     }
 
@@ -145,9 +142,10 @@ class MapFetcher {
         }
 
         let addresses = [];
-        if (!ipaddr.isValid(urlObj.hostname)) {
-            const resolver = new Resolver();
-            addresses = await promisify(resolver.resolve).bind(resolver)(urlObj.hostname);
+        if (urlObj.hostname.startsWith("[") && urlObj.hostname.endsWith("]")) {
+            addresses = [urlObj.hostname.slice(1, -1)];
+        } else if (!ipaddr.isValid(urlObj.hostname)) {
+            addresses = (await dnsPromises.lookup(urlObj.hostname, { all: true })).map((x) => x.address);
         } else {
             addresses = [urlObj.hostname];
         }

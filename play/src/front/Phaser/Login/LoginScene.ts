@@ -3,7 +3,7 @@ import { localUserStore } from "../../Connection/LocalUserStore";
 import { connectionManager } from "../../Connection/ConnectionManager";
 import { gameManager } from "../Game/GameManager";
 import { analyticsClient } from "../../Administration/AnalyticsClient";
-import { isUserNameTooLong, isUserNameValid } from "../../Connection/LocalUser";
+import { isUserNameTooLong, isUserNameValid } from "../../Connection/LocalUserUtils";
 import { NameNotValidError, NameTooLongError } from "../../Exception/NameError";
 import { ResizableScene } from "./ResizableScene";
 import { SelectCharacterSceneName } from "./SelectCharacterScene";
@@ -30,7 +30,7 @@ export class LoginScene extends ResizableScene {
             gameManager.currentStartedRoom &&
             gameManager.currentStartedRoom.authenticationMandatory
         ) {
-            const redirect = connectionManager.loadOpenIDScreen();
+            const redirect = connectionManager.loadOpenIDScreen(false);
             if (redirect !== null) {
                 window.location.assign(redirect.toString());
             }

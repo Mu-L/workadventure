@@ -1,76 +1,110 @@
-import { stringify } from "circular-json";
+import { dumpVariable } from "@workadventure/shared-utils/src/Debug/dumpVariable";
 import { HttpRequest, HttpResponse } from "uWebSockets.js";
 import { parse } from "query-string";
-import * as Sentry from "@sentry/node";
+import debug from "debug";
 import { ADMIN_API_TOKEN } from "../Enum/EnvironmentVariable";
 import { App } from "../Server/sifrr.server";
 import { socketManager } from "../Services/SocketManager";
-import { CustomJsonReplacerInterface } from "../Model/CustomJsonReplacerInterface";
 
 export class DebugController {
+    private debugTimeout: NodeJS.Timeout | undefined;
+
     constructor(private App: App) {
         this.getDump();
+        this.enableDebug();
+        this.disableDebug();
     }
 
     getDump() {
-        this.App.get("/dump", (res: HttpResponse, req: HttpRequest) => {
-            (async () => {
-                const query = parse(req.getQuery());
+        this.App.get("/dump", (res: HttpResponse, req: HttpRequest): void => {
+            const query = parse(req.getQuery());
 
-                if (!ADMIN_API_TOKEN) {
-                    return res.writeStatus("401 Unauthorized").end("No token configured!");
-                }
-                if (query.token !== ADMIN_API_TOKEN) {
-                    return res.writeStatus("401 Unauthorized").end("Invalid token sent!");
-                }
+            if (!ADMIN_API_TOKEN) {
+                res.writeStatus("401 Unauthorized").end("No token configured!");
+                return;
+            }
+            if (query.token !== ADMIN_API_TOKEN) {
+                res.writeStatus("401 Unauthorized").end("Invalid token sent!");
+                return;
+            }
 
-                return res
-                    .writeStatus("200 OK")
-                    .writeHeader("Content-Type", "application/json")
-                    .end(
-                        stringify(
-                            await Promise.all(socketManager.getWorlds().values()),
-                            function (key: unknown, value: unknown) {
-                                const customObj = CustomJsonReplacerInterface.safeParse(this);
-                                if (customObj.success) {
-                                    const val = customObj.data.customJsonReplacer(key, value);
-                                    if (val !== undefined) {
-                                        return val;
-                                    }
-                                }
+            res.writeStatus("200 OK").end(
+                dumpVariable(socketManager, (value: unknown) => {
+                    if (value && typeof value === "object" && value.constructor) {
+                        if (value.constructor.name === "uWS.WebSocket") {
+                            return "WebSocket";
+                        } else if (value.constructor.name === "ClientDuplexStreamImpl") {
+                            return "ClientDuplexStreamImpl";
+                        } else if (value.constructor.name === "ClientReadableStreamImpl") {
+                            return "ClientReadableStreamImpl";
+                        } else if (value.constructor.name === "ServerWritableStreamImpl") {
+                            return "ServerWritableStreamImpl";
+                        } else if (value.constructor.name === "ServerDuplexStreamImpl") {
+                            return "ServerDuplexStreamImpl";
+                        } else if (value.constructor.name === "Commander") {
+                            return "Commander";
+                        }
+                    }
+                    return value;
+                })
+            );
+            return;
+        });
+    }
 
-                                if (key === "socket") {
-                                    return "Socket";
-                                }
-                                if (key === "batchedMessages") {
-                                    return "BatchedMessages";
-                                }
-                                if (value instanceof Map) {
-                                    const obj: { [key: string | number]: unknown } = {};
-                                    for (const [mapKey, mapValue] of value.entries()) {
-                                        if (typeof mapKey === "number" || typeof mapKey === "string") {
-                                            obj[mapKey] = mapValue;
-                                        }
-                                    }
-                                    return obj;
-                                } else if (value instanceof Set) {
-                                    const obj: Array<unknown> = [];
-                                    for (const setValue of value.values()) {
-                                        obj.push(setValue);
-                                    }
-                                    return obj;
-                                } else {
-                                    return value;
-                                }
-                            }
-                        )
-                    );
-            })().catch((e) => {
-                console.error(e);
-                Sentry.captureException(e);
-                res.writeStatus("500");
-                res.end("An error occurred");
-            });
+    enableDebug() {
+        this.App.put("/debug/enable", (res: HttpResponse, req: HttpRequest): void => {
+            const query = parse(req.getQuery());
+
+            if (!ADMIN_API_TOKEN) {
+                res.writeStatus("401 Unauthorized").end("No token configured!");
+                return;
+            }
+
+            if (query.token !== ADMIN_API_TOKEN) {
+                res.writeStatus("401 Unauthorized").end("Invalid token sent!");
+                return;
+            }
+
+            let namespaces = "*";
+
+            if (query.namespaces) {
+                namespaces = Array.isArray(query.namespaces) ? query.namespaces.join(",") : query.namespaces;
+            }
+
+            debug.enable(namespaces);
+
+            const ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
+
+            this.debugTimeout = setTimeout(() => {
+                debug.disable();
+            }, ONE_DAY_IN_MS);
+
+            res.writeStatus("200 OK").end("Active debug");
+        });
+    }
+    disableDebug() {
+        this.App.put("/debug/disable", (res: HttpResponse, req: HttpRequest): void => {
+            const query = parse(req.getQuery());
+
+            if (!ADMIN_API_TOKEN) {
+                res.writeStatus("401 Unauthorized").end("No token configured!");
+                return;
+            }
+
+            if (query.token !== ADMIN_API_TOKEN) {
+                res.writeStatus("401 Unauthorized").end("Invalid token sent!");
+                return;
+            }
+
+            debug.disable();
+
+            if (this.debugTimeout) {
+                clearTimeout(this.debugTimeout);
+                this.debugTimeout = undefined;
+            }
+
+            res.writeStatus("200 OK").end("Debug disabled");
         });
     }
 }

@@ -361,6 +361,52 @@ if they are in the same room. So far, there is a limitation preventing brothers 
 they are in different rooms in the same world.
 
 
+### Typing player variables
+
+If you are using Typescript, by default, the type of player variables is `unknown`. This is for security purpose, as we don't know
+the type of the variable.
+
+Internally, we define two interfaces named `PublicPlayerState` and `PrivatePlayerState` that contains the type of all player variables.
+`PublicPlayerState` contains the state of all public variables (variables that are shared with other players) and `PrivatePlayerState` 
+contains the state of all private variables (variables that are only accessible by the current player).
+
+The default declaration of `PublicPlayerState` and `PrivatePlayerState` is:
+
+```typescript
+interface PublicPlayerState {
+    [key: string]: unknown;
+}
+
+interface PrivatePlayerState {
+  [key: string]: unknown;
+}
+```
+
+Typescript allows third party module to merge their own types with existing ones. This means that you can define your own
+`PublicPlayerState` and `PrivatePlayerState` interfaces in your code, and it will be merged with the default one. You will need to use this syntax in your code:
+
+```typescript
+declare module "@workadventure/iframe-api-typings" {
+    interface PublicPlayerState {
+        someVariable: string,
+        anotherVariable: number,
+    }
+
+  interface PrivatePlayerState {
+    someSecret: string[],
+  }
+}
+```
+
+This will allow you to access `WA.player.state.someVariable` and `WA.player.state.someSecret` with the correct types.
+
+:::caution
+Merging your own declaration of `PublicPlayerState` and `PrivatePlayerState` will give you type checking at compile time and autocompletion in your IDE.
+However, as it is customary with Typescript, it will not do any actual type checking at runtime. Do not forget that
+player variables can be set by any player. This means that even if Typescript tells you that `WA.player.state.someVariable`
+is a string, it could be a number at runtime. The only way to be sure of the type of a variable is to check it at runtime
+using type guards or a type checking library like Zod.
+:::
 
 
 
@@ -368,6 +414,10 @@ they are in different rooms in the same world.
 ```typescript
 WA.player.moveTo(x: number, y: number, speed?: number): Promise<{ x: number, y: number, cancelled: boolean }>;
 ```
+:::caution
+The parameters `x` and `y` are numbers of **pixels**, not tiles. So make sure to multiply them by 32 if you are counting tiles.
+:::
+
 Player will try to find shortest path to the destination point and proceed to move there.
 ```typescript
 // Let's move player to x: 250 y: 250 with speed of 10
@@ -400,6 +450,9 @@ const result = await WA.player.moveTo(250, 250, 10);
 ```typescript
 WA.player.teleport(x: number, y: number): Promise<void>;
 ```
+:::caution
+The parameters `x` and `y` are numbers of **pixels**, not tiles. So make sure to multiply them by 32 if you are counting tiles.
+:::
 
 Player will be teleported to the destination point.
 
@@ -442,8 +495,8 @@ browsers automatically).
 ## Detecting when the user enters/leaves a meeting
 
 ```ts
-WA.player.proximityMeeting.onJoin(): Subscription
-WA.player.proximityMeeting.onLeave(): Subscription
+WA.player.proximityMeeting.onJoin(): Subscription<RemotePlayerInterface[]>
+WA.player.proximityMeeting.onLeave(): Subscription<RemotePlayerInterface[]>
 ```
 
 The event is triggered when the user enters or leaves a proximity meeting.
@@ -463,8 +516,8 @@ WA.player.proximityMeeting.onLeave().subscribe(async () => {
 ## Detecting when a participant enters/leaves the current meeting
 
 ```ts
-WA.player.proximityMeeting.onParticipantJoin(): Subscription
-WA.player.proximityMeeting.onParticipantLeave(): Subscription
+WA.player.proximityMeeting.onParticipantJoin(): Subscription<RemotePlayerInterface>
+WA.player.proximityMeeting.onParticipantLeave(): Subscription<RemotePlayerInterface>
 ```
 
 The event is triggered when a user enters or leaves a proximity meeting.
@@ -473,11 +526,11 @@ Example:
 
 ```ts
 WA.player.proximityMeeting.onParticipantJoin().subscribe(async (player: RemotePlayerInterface) => {
-    WA.chat.sendChatMessage("A participant joined the proximity chat", "System");
+    WA.chat.sendChatMessage("A participant joined the proximity chat", { scope: 'local', author: 'System' });
 });
 
 WA.player.proximityMeeting.onParticipantLeave().subscribe(async (player: RemotePlayerInterface) => {
-    WA.chat.sendChatMessage("A participant left the proximity chat", "System");
+    WA.chat.sendChatMessage("A participant left the proximity chat", { scope: 'local', author: 'System' });
 });
 ```
 
@@ -501,3 +554,186 @@ await WA.player.proximityMeeting.playSound("https://example.com/my_sound.mp3");
 ```
 
 The method returns a promise that resolves when the sound has been played.
+
+## Streaming sound to players in the same meeting
+
+:::warning
+This feature is experimental. The signature of the function might change in the future.
+:::
+
+You can send a stream of audio to all the players in the same bubble. A typical use case for this feature is to create a 
+voice chat in WorkAdventure. The sound can be generated on a server and streamed to the players in the bubble.
+
+```ts
+WA.player.proximityMeeting.startAudioStream(sampleRate: number): Promise<AudioStream>;
+
+interface AudioStream {
+  appendAudioData(data: Float32Array): Promise<void>;
+  resetAudioBuffer(): Promise<void>;
+  close(): Promise<void>;
+}
+```
+
+The `startAudioStream` function starts an audio stream to all the players in the same bubble. The `sampleRate` parameter 
+is the sample rate of the audio stream. For a 24kHz audio stream, you would use `24000`.
+
+The function returns an `AudioStream` object that you can use to send audio data to the players.
+
+The `appendAudioData` function sends a chunk of audio data to the players. The `data` parameter is an array of
+float32 values representing the raw uncompressed audio data.
+
+You can send multiple chunks of audio data in a row. If you are sending chunks of audio data faster than the sound
+is played, the audio stream will buffer the data and play it at the correct speed.
+
+`appendAudioData` returns a promise. The promise resolves only when the sound was actually dispatched/played in the bubble.
+
+:::warning
+You don't want to put an `await` in front of your call to `appendAudioData`. Indeed, you should put as much as possible
+in the audio buffer. If you wait for the sound to be played before emitting the next bit of sound, the sound will stutter.  
+:::
+
+
+:::note
+Please note the sound is played to all the players in the bubble except the player who called the function.
+:::
+
+If you sent too much data and want to stop the audio stream, you can call the `resetAudioBuffer` function. This will
+empty the audio buffer and stop the audio stream. When you do so, any promise returned by `appendAudioData` that
+match a chunk of audio data that was not played yet will be rejected.
+
+Finally, when you are done with the audio stream, you can call the `close` function. This will stop the audio stream
+and free the resources.
+
+Example:
+
+The following example generates a 10 seconds long sine wave at 440Hz and sends it to the players in the bubble for 5 seconds.
+Then it stops the stream and waits for 5 seconds before closing the stream.
+
+```ts
+const sampleRate = 24000;
+
+const audioStream = await WA.player.proximityMeeting.startAudioStream(sampleRate);
+
+// Generate a sine wave
+    
+const frequency = 440;
+const amplitude = 0.5;
+const duration = 10;
+const numSamples = duration * sampleRate;
+const samples = new Float32Array(numSamples);
+for (let i = 0; i < numSamples; i++) {
+    samples[i] = amplitude * Math.sin(2 * Math.PI * frequency * i / sampleRate);
+}
+
+audioStream.appendAudioData(samples);
+
+// Wait for 5 seconds
+await new Promise((resolve) => setTimeout(resolve, 5000));
+
+// Stop the stream.
+audioStream.resetAudioBuffer();
+
+// Wait for 5 seconds
+await new Promise((resolve) => setTimeout(resolve, 5000));
+
+// Close the stream.
+await audioStream.close();
+```
+
+## Listening to the microphone of the players in the same meeting
+
+:::warning
+This feature is experimental. The signature of the function might change in the future.
+:::
+
+```ts
+WA.player.proximityMeeting.listenToAudioStream(sampleRate: number): Observable<Float32Array>
+```
+
+The `listenToAudioStream` function listens to the microphone of all the players in the same bubble. The `sampleRate` parameter
+is the sample rate of the audio stream. For a 24kHz audio stream, you would use `24000`.
+
+The function returns an RxJS `Observable` object that you can use to listen to the audio data. The observable is called
+every few milliseconds with a chunk of audio data.
+
+The voice of all players in the bubble is merged in a single mono stream.
+
+Audio data is sent as an array of float32 values representing the raw uncompressed audio data.
+
+Example:
+
+```ts
+const sampleRate = 24000;
+
+const subscription = WA.player.proximityMeeting.listenToAudioStream(sampleRate).subscribe((data: Float32Array) => {
+    // Process the audio data
+    console.log(data);
+});
+
+// When you are done listening to the audio stream, you can unsubscribe from the observable.
+subscription.unsubscribe();
+```
+
+## Asking users to follow you
+
+:::warning
+This feature is experimental. The signature of the function might change in the future.
+:::
+
+```ts
+WA.player.proximityMeeting.followMe(): Promise<void>
+```
+
+The `followMe` function asks all the players in the same bubble to follow the player who called the function.
+Unlike the "follow" button in the UI, all the players in the bubble will be forced to follow the player who called the function.
+They can still stop following the player by clicking on the "stop following" button in the UI.
+
+
+
+## Stop leading users
+
+:::warning
+This feature is experimental. The signature of the function might change in the future.
+:::
+
+```ts
+WA.player.proximityMeeting.stopLeading(): Promise<void>
+```
+
+This function is the opposite of `followMe`. It ends the "follow" state for all the players in the bubble.
+
+Example:
+
+```ts
+// Start leading the users
+await WA.player.proximityMeeting.followMe();
+// Move everybody to (250, 250)
+await WA.player.moveTo(250, 250);
+// Stop leading the users
+await WA.player.proximityMeeting.stopLeading();
+```
+
+## Tracking who is following you
+
+:::warning
+This feature is experimental. The signature of the function might change in the future.
+:::
+
+```ts
+WA.player.proximityMeeting.onFollowed(): Subscription<RemotePlayerInterface>
+WA.player.proximityMeeting.onUnfollowed(): Subscription<RemotePlayerInterface>
+```
+
+You can be notified when a player starts following you or stops following you.
+
+Example:
+
+```ts
+WA.player.proximityMeeting.onFollowed().subscribe(async (player: RemotePlayerInterface) => {
+    WA.chat.sendChatMessage(`${player.name} is now following you`, { scope: 'local', author: 'System' });
+});
+
+WA.player.proximityMeeting.onUnfollowed().subscribe(async (player: RemotePlayerInterface) => {
+    WA.chat.sendChatMessage(`${player.name} stopped following you`, { scope: 'local', author: 'System' });
+});
+```

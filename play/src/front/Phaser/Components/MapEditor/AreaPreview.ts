@@ -19,8 +19,11 @@ export enum AreaPreviewEvent {
     Copied = "AreaPreview:Copied",
     Updated = "AreaPreview:Updated",
     Delete = "AreaPreview:Delete",
+    UpdateVisibility = "AreaPreview:UpdateVisibility",
 }
+
 const DEFAULT_COLOR = 0x0000ff;
+
 export class AreaPreview extends Phaser.GameObjects.Rectangle {
     private squares: SizeAlteringSquare[];
 
@@ -87,6 +90,20 @@ export class AreaPreview extends Phaser.GameObjects.Rectangle {
         this.scene.add.existing(this);
     }
 
+    public get description(): string | undefined {
+        const descriptionProperty: AreaDescriptionPropertyData | undefined = this.areaData.properties.find(
+            (p) => p.type === "areaDescriptionProperties"
+        ) as AreaDescriptionPropertyData | undefined;
+        return descriptionProperty?.description;
+    }
+
+    public get searchable(): boolean | undefined {
+        const descriptionProperty: AreaDescriptionPropertyData | undefined = this.areaData.properties.find(
+            (p) => p.type === "areaDescriptionProperties"
+        ) as AreaDescriptionPropertyData | undefined;
+        return descriptionProperty?.searchable;
+    }
+
     public update(time: number, dt: number): void {
         if (this.selected) {
             this.squares.forEach((square, index) => {
@@ -109,22 +126,119 @@ export class AreaPreview extends Phaser.GameObjects.Rectangle {
         this.showSizeAlteringSquares(value);
     }
 
-    private showPropertiesIcon(value: boolean) {
-        this.propertiesIcon.forEach((icon: GameObjects.Image) => icon.setVisible(value));
-    }
-
     public setVisible(value: boolean): this {
         this.visible = value;
         this.showPropertiesIcon(value);
         if (!value) {
             this.showSizeAlteringSquares(false);
         }
+        this.emit(AreaPreviewEvent.UpdateVisibility, value);
         return this;
     }
 
     public updatePreview(dataToModify: AtLeast<AreaData, "id">): void {
         _.merge(this.areaData, dataToModify);
         this.drawAreaPreviewFromAreaData(dataToModify);
+    }
+
+    public getSize(): number {
+        return this.displayWidth * this.displayHeight;
+    }
+
+    public addProperty(property: AreaDataProperty): void {
+        const oldAreaData = structuredClone(this.areaData);
+        this.areaData.properties.push(property);
+        this.emit(AreaPreviewEvent.Updated, this.areaData, oldAreaData);
+    }
+
+    public updateProperty(changes: AtLeast<AreaDataProperty, "id">, removeAreaEntities?: boolean): void {
+        const oldAreaData = structuredClone(this.areaData);
+        const property = this.areaData.properties.find((property) => property.id === changes.id);
+        if (property) {
+            _.mergeWith(property, changes, (_, targetProperty) => {
+                if (targetProperty instanceof Array) {
+                    return targetProperty;
+                }
+                return;
+            });
+        }
+        this.emit(AreaPreviewEvent.Updated, this.areaData, oldAreaData, removeAreaEntities);
+    }
+
+    public deleteProperty(id: string, removeAreaEntities?: boolean): boolean {
+        const oldAreaData = structuredClone(this.areaData);
+        const index = this.areaData.properties.findIndex((property) => property.id === id);
+        if (index !== -1) {
+            this.areaData.properties.splice(index, 1);
+            this.emit(AreaPreviewEvent.Updated, this.areaData, oldAreaData, removeAreaEntities);
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    public getProperties(): AreaDataProperties {
+        return this.areaData.properties;
+    }
+
+    public destroy(): void {
+        super.destroy();
+        this.squares.forEach((square) => square.destroy());
+    }
+
+    public getPosition(): { x: number; y: number } {
+        return { x: this.x, y: this.y };
+    }
+
+    public getAreaData(): AreaData {
+        return this.areaData;
+    }
+
+    public setAreaName(name: string): void {
+        const oldAreaData = structuredClone(this.areaData);
+        this.areaData.name = name;
+        const data = { id: this.areaData.id, name: this.areaData.name };
+        this.emit(AreaPreviewEvent.Updated, data, oldAreaData);
+    }
+
+    public getId(): string {
+        return this.areaData.id;
+    }
+
+    public changeColor(color: string | number | Phaser.Types.Display.InputColorObject) {
+        this.setFillStyle(Phaser.Display.Color.ValueToColor(color).color, 0.5);
+        this.updateSquaresPositions();
+    }
+
+    public resetColor() {
+        if (this.areaData != undefined) {
+            this.propertiesIcon.forEach((icon: GameObjects.Image) => icon.destroy());
+            let counter = 0;
+            if (this.areaData.properties.length > 0) {
+                for (const property of this.areaData.properties) {
+                    const iconProperties = this.getPropertyIcons(property.type);
+
+                    const icon = new GameObjects.Image(
+                        this.scene,
+                        (this.getTopLeft().x ?? 0) + 10 + counter * 15,
+                        (this.getTopLeft().y ?? 0) + 10,
+                        `icon${iconProperties.name}`
+                    );
+                    icon.setScale(0.12);
+                    icon.setDepth(this.depth + 1);
+                    icon.setVisible(true);
+                    this.setFillStyle(Phaser.Display.Color.ValueToColor(iconProperties.color).color, 0.5);
+                    counter++;
+                }
+            } else {
+                this.setFillStyle(Phaser.Display.Color.ValueToColor(DEFAULT_COLOR).color, 0.5);
+            }
+        }
+        this.updateSquaresPositions();
+    }
+
+    private showPropertiesIcon(value: boolean) {
+        this.propertiesIcon.forEach((icon: GameObjects.Image) => icon.setVisible(value));
     }
 
     private drawAreaPreviewFromAreaData(areaData: AreaData | AtLeast<AreaData, "id">): void {
@@ -153,51 +267,11 @@ export class AreaPreview extends Phaser.GameObjects.Rectangle {
                 counter++;
             }
         }
-        this.x = this.areaData.x + this.areaData.width * 0.5;
-        this.y = this.areaData.y + this.areaData.height * 0.5;
-        this.displayWidth = this.areaData.width;
-        this.displayHeight = this.areaData.height;
+        this.x = Math.floor(this.areaData.x + this.areaData.width * 0.5);
+        this.y = Math.floor(this.areaData.y + this.areaData.height * 0.5);
+        this.displayWidth = Math.floor(this.areaData.width);
+        this.displayHeight = Math.floor(this.areaData.height);
         this.updateSquaresPositions();
-    }
-
-    public getSize(): number {
-        return this.displayWidth * this.displayHeight;
-    }
-
-    public addProperty(property: AreaDataProperty): void {
-        const oldAreaData = structuredClone(this.areaData);
-        this.areaData.properties.push(property);
-        this.emit(AreaPreviewEvent.Updated, this.areaData, oldAreaData);
-    }
-
-    public updateProperty(changes: AtLeast<AreaDataProperty, "id">): void {
-        const oldAreaData = structuredClone(this.areaData);
-        const property = this.areaData.properties.find((property) => property.id === changes.id);
-        if (property) {
-            _.merge(property, changes);
-        }
-        this.emit(AreaPreviewEvent.Updated, this.areaData, oldAreaData);
-    }
-
-    public deleteProperty(id: string): boolean {
-        const oldAreaData = structuredClone(this.areaData);
-        const index = this.areaData.properties.findIndex((property) => property.id === id);
-        if (index !== -1) {
-            this.areaData.properties.splice(index, 1);
-            this.emit(AreaPreviewEvent.Updated, this.areaData, oldAreaData);
-            return true;
-        } else {
-            return false;
-        }
-    }
-
-    public getProperties(): AreaDataProperties {
-        return this.areaData.properties;
-    }
-
-    public destroy(): void {
-        super.destroy();
-        this.squares.forEach((square) => square.destroy());
     }
 
     private showSizeAlteringSquares(show = true): void {
@@ -235,11 +309,11 @@ export class AreaPreview extends Phaser.GameObjects.Rectangle {
                 if (this.shiftKey?.isDown) {
                     const topLeftX = Math.floor((dragX - this.displayWidth * 0.5) / 32) * 32;
                     const topLeftY = Math.floor((dragY - this.displayHeight * 0.5) / 32) * 32;
-                    this.x = topLeftX + this.displayWidth * 0.5;
-                    this.y = topLeftY + this.displayHeight * 0.5;
+                    this.x = Math.round(topLeftX + this.displayWidth * 0.5);
+                    this.y = Math.round(topLeftY + this.displayHeight * 0.5);
                 } else {
-                    this.x = dragX;
-                    this.y = dragY;
+                    this.x = Math.round(dragX);
+                    this.y = Math.round(dragY);
                 }
                 this.updateSquaresPositions();
                 this.moved = true;
@@ -268,8 +342,8 @@ export class AreaPreview extends Phaser.GameObjects.Rectangle {
                 this.updateAreaDataWithSquaresAdjustments();
                 const data: AtLeast<AreaData, "id"> = {
                     id: this.getAreaData().id,
-                    x: this.x - this.displayWidth * 0.5,
-                    y: this.y - this.displayHeight * 0.5,
+                    x: Math.floor(this.x - this.displayWidth * 0.5),
+                    y: Math.floor(this.y - this.displayHeight * 0.5),
                     width: this.displayWidth,
                     height: this.displayHeight,
                 };
@@ -305,13 +379,13 @@ export class AreaPreview extends Phaser.GameObjects.Rectangle {
 
                     if (newWidth >= 10) {
                         this.displayWidth = newWidth;
-                        this.x = this.squares[Edge.LeftCenter].x + this.displayWidth * 0.5;
+                        this.x = Math.floor(this.squares[Edge.LeftCenter].x + this.displayWidth * 0.5);
                     } else {
                         square.x = oldX;
                     }
                     if (newHeight >= 10) {
                         this.displayHeight = newHeight;
-                        this.y = this.squares[Edge.TopCenter].y + this.displayHeight * 0.5;
+                        this.y = Math.floor(this.squares[Edge.TopCenter].y + this.displayHeight * 0.5);
                     } else {
                         square.y = oldY;
                     }
@@ -350,13 +424,13 @@ export class AreaPreview extends Phaser.GameObjects.Rectangle {
 
                 if (newWidth >= 10) {
                     this.displayWidth = newWidth;
-                    this.x = newCenterX;
+                    this.x = Math.floor(newCenterX);
                 } else {
                     square.x = oldX;
                 }
                 if (newHeight >= 10) {
                     this.displayHeight = newHeight;
-                    this.y = newCenterY;
+                    this.y = Math.floor(newCenterY);
                 } else {
                     square.y = oldY;
                 }
@@ -373,8 +447,8 @@ export class AreaPreview extends Phaser.GameObjects.Rectangle {
                 this.updateAreaDataWithSquaresAdjustments();
                 const data: AtLeast<AreaData, "id"> = {
                     id: this.getAreaData().id,
-                    x: this.x - this.displayWidth * 0.5,
-                    y: this.y - this.displayHeight * 0.5,
+                    x: Math.floor(this.x - this.displayWidth * 0.5),
+                    y: Math.floor(this.y - this.displayHeight * 0.5),
                     width: this.displayWidth,
                     height: this.displayHeight,
                 };
@@ -397,30 +471,11 @@ export class AreaPreview extends Phaser.GameObjects.Rectangle {
     private updateAreaDataWithSquaresAdjustments(): void {
         this.areaData = {
             ...this.areaData,
-            x: this.x - this.displayWidth * 0.5,
-            y: this.y - this.displayHeight * 0.5,
-            width: this.displayWidth,
-            height: this.displayHeight,
+            x: Math.floor(this.x - this.displayWidth * 0.5),
+            y: Math.floor(this.y - this.displayHeight * 0.5),
+            width: Math.floor(this.displayWidth),
+            height: Math.floor(this.displayHeight),
         };
-    }
-
-    public getPosition(): { x: number; y: number } {
-        return { x: this.x, y: this.y };
-    }
-
-    public getAreaData(): AreaData {
-        return this.areaData;
-    }
-
-    public setAreaName(name: string): void {
-        const oldAreaData = structuredClone(this.areaData);
-        this.areaData.name = name;
-        const data = { id: this.areaData.id, name: this.areaData.name };
-        this.emit(AreaPreviewEvent.Updated, data, oldAreaData);
-    }
-
-    public getId(): string {
-        return this.areaData.id;
     }
 
     private getPropertyIcons(name: string) {
@@ -460,57 +515,29 @@ export class AreaPreview extends Phaser.GameObjects.Rectangle {
                     name: "Silent",
                     color: "FF5A5F",
                 };
+            case "extensionModule": {
+                return {
+                    name: "Extension",
+                    color: "464EB8",
+                };
+            }
+            case "matrixRoomPropertyData": {
+                return {
+                    name: "MatrixRoom",
+                    color: "0cbd8b",
+                };
+            }
+            case "tooltipPropertyData": {
+                return {
+                    name: "Tooltip",
+                    color: "0b66c2",
+                };
+            }
             default:
                 return {
                     name: "",
                     color: "FFFFFF",
                 };
         }
-    }
-
-    public changeColor(color: string | number | Phaser.Types.Display.InputColorObject) {
-        this.setFillStyle(Phaser.Display.Color.ValueToColor(color).color, 0.5);
-        this.updateSquaresPositions();
-    }
-
-    public resetColor() {
-        if (this.areaData != undefined) {
-            this.propertiesIcon.forEach((icon: GameObjects.Image) => icon.destroy());
-            let counter = 0;
-            if (this.areaData.properties.length > 0) {
-                for (const property of this.areaData.properties) {
-                    const iconProperties = this.getPropertyIcons(property.type);
-
-                    const icon = new GameObjects.Image(
-                        this.scene,
-                        (this.getTopLeft().x ?? 0) + 10 + counter * 15,
-                        (this.getTopLeft().y ?? 0) + 10,
-                        `icon${iconProperties.name}`
-                    );
-                    icon.setScale(0.12);
-                    icon.setDepth(this.depth + 1);
-                    icon.setVisible(true);
-                    this.setFillStyle(Phaser.Display.Color.ValueToColor(iconProperties.color).color, 0.5);
-                    counter++;
-                }
-            } else {
-                this.setFillStyle(Phaser.Display.Color.ValueToColor(DEFAULT_COLOR).color, 0.5);
-            }
-        }
-        this.updateSquaresPositions();
-    }
-
-    public get description(): string | undefined {
-        const descriptionProperty: AreaDescriptionPropertyData | undefined = this.areaData.properties.find(
-            (p) => p.type === "areaDescriptionProperties"
-        ) as AreaDescriptionPropertyData | undefined;
-        return descriptionProperty?.description;
-    }
-
-    public get searchable(): boolean | undefined {
-        const descriptionProperty: AreaDescriptionPropertyData | undefined = this.areaData.properties.find(
-            (p) => p.type === "areaDescriptionProperties"
-        ) as AreaDescriptionPropertyData | undefined;
-        return descriptionProperty?.searchable;
     }
 }

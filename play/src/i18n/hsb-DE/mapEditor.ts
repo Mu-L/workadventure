@@ -8,6 +8,12 @@ const mapEditor: DeepPartial<Translation["mapEditor"]> = {
         tileEditor: "Kachlu wobdźěłać",
         trashEditor: "papjernik",
         closeMapEditor: "Mapu zacyniś",
+        mapManagerActivated: "Mapowy manager je aktiwny",
+        exploreTheRoomActivated: "Wobłuk wužiwać",
+        areaEditorActivated: "Płoninu wobdźěłać",
+        entityEditorActivated: "Entita wobdźěłać",
+        trashEditorActivated: "Papjernik wužiwać",
+        configureMyRoomActivated: "Mój rum wobdźěłać",
     },
     properties: {
         silentProperty: {
@@ -80,6 +86,7 @@ const mapEditor: DeepPartial<Translation["mapEditor"]> = {
             errorInvalidUrl: 'Njepłaćiwa URL. Dyrbi so z "http: /" abo "https: / /" započeć.',
             findOutMoreHere: "Tu zhoniće wjace",
             openPickerSelector: "Wubrać",
+            forcedInNewTab: "W nowem tabje wočinić",
         },
         advancedOptions: "Rozšěrjene opcije",
         speakerMegaphoneProperties: {
@@ -108,10 +115,10 @@ const mapEditor: DeepPartial<Translation["mapEditor"]> = {
             exitMapStartAreaName: "startowy wobłuk",
         },
         youtubeProperties: {
-            label: "Youtube-Video wočinić",
-            description: "Youtube-Video při zastupje wočinić.",
-            error: "Prošu zapodać płaćiwy Youtube-URL",
-            disabled: "Youtube-wočinjenje je deaktiwowane.",
+            label: "YouTube-Video wočinić",
+            description: "YouTube-Video při zastupje wočinić.",
+            error: "Prošu zapodać płaćiwy YouTube-URL",
+            disabled: "YouTube-wočinjenje je deaktiwowane.",
         },
         googleDocsProperties: {
             label: "Google Docs wočinić",

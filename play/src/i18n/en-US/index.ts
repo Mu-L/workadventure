@@ -13,15 +13,19 @@ import refreshPrompt from "./refreshPrompt";
 import warning from "./warning";
 import emoji from "./emoji";
 import trigger from "./trigger";
-import muc from "./muc";
 import notification from "./notification";
 import cowebsite from "./cowebsite";
 import actionbar from "./actionbar";
 import mapEditor from "./mapEditor";
 import megaphone from "./megaphone";
 import video from "./video";
+import statusModal from "./statusModal";
+import area from "./area";
+import externalModule from "./externalModule";
+import form from "./form";
 
 const en_US: BaseTranslation = {
+    area,
     audio,
     camera,
     chat,
@@ -36,13 +40,15 @@ const en_US: BaseTranslation = {
     warning,
     emoji,
     trigger,
-    muc,
     notification,
     cowebsite,
     actionbar,
     mapEditor,
     megaphone,
     video,
+    statusModal,
+    externalModule,
+    form,
 };
 
 export default en_US;

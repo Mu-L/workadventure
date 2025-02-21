@@ -1,208 +1,227 @@
 <script lang="ts">
-    import { get, writable } from "svelte/store";
-    import { EmbedScreen, highlightedEmbedScreen } from "../../Stores/HighlightedEmbedScreenStore";
-    import MoreActionSvg from "../images/ellipsis.svg";
+    import { createEventDispatcher } from "svelte";
+    import { highlightedEmbedScreen } from "../../Stores/HighlightedEmbedScreenStore";
     import MicrophoneCloseSvg from "../images/microphone-close.svg";
     import banUserSvg from "../images/ban-user.svg";
     import NoVideoSvg from "../images/no-video.svg";
     import PinSvg from "../images/pin.svg";
-    import BubbleTalkPng from "../images/bubble-talk.png";
-    import { TrackStreamWrapperInterface } from "../../Streaming/Contract/TrackStreamWrapperInterface";
-    import Tooltip from "../Util/Tooltip.svelte";
+    //import BubbleTalkPng from "../images/bubble-talk.png";
     import { LL } from "../../../i18n/i18n-svelte";
-    import { VideoPeer } from "../../WebRtc/VideoPeer";
-    import { userIsAdminStore } from "../../Stores/GameStore";
+    import { requestVisitCardsStore, userIsAdminStore } from "../../Stores/GameStore";
     import { analyticsClient } from "../../Administration/AnalyticsClient";
     import { embedScreenLayoutStore } from "../../Stores/EmbedScreensStore";
     import { LayoutMode } from "../../WebRtc/LayoutManager";
-    import reportImg from "./images/report.svg";
+    import { Streamable } from "../../Stores/StreamableCollectionStore";
+    import { SpaceUserExtended } from "../../Space/SpaceFilter/SpaceFilter";
+    import { peerStore } from "../../Stores/PeerStore";
+    import { showReportScreenStore } from "../../Stores/ShowReportScreenStore";
+    import { IconAlertTriangle, IconUser } from "@wa-icons";
 
-    export let embedScreen: EmbedScreen;
-    export let trackStreamWraper: TrackStreamWrapperInterface;
+    export let embedScreen: Streamable;
+    export let spaceUser: SpaceUserExtended;
     export let videoEnabled: boolean;
 
-    let moreActionOpened = writable<boolean>(false);
+    const dispatch = createEventDispatcher();
 
-    function muteAudio() {
-        trackStreamWraper.muteAudioParticipant();
+    let moreActionOpened = false;
+
+    function muteAudio(spaceUser: SpaceUserExtended) {
+        analyticsClient.muteMicrophoneMeetingAction();
+        spaceUser.emitPrivateEvent({
+            $case: "muteAudio",
+            muteAudio: {
+                force: false, // This is going to be overwritten by the processor of muteAudio in the back
+            },
+        });
+        close();
     }
 
-    function muteAudioEveryBody() {
-        trackStreamWraper.muteAudioEveryBody();
+    function muteAudioEveryBody(spaceUser: SpaceUserExtended) {
+        analyticsClient.muteMicrophoneEverybodyMeetingAction();
+        spaceUser.space.emitPublicMessage({
+            $case: "muteAudioForEverybody",
+            muteAudioForEverybody: {},
+        });
+        close();
     }
 
-    function muteVideo() {
-        trackStreamWraper.muteVideoParticipant();
+    function muteVideo(spaceUser: SpaceUserExtended) {
+        analyticsClient.muteVideoMeetingAction();
+        spaceUser.emitPrivateEvent({
+            $case: "muteVideo",
+            muteVideo: {
+                force: false, // This is going to be overwritten by the processor of muteVideo in the back
+            },
+        });
+        close();
     }
 
-    function muteVideoEveryBody() {
-        trackStreamWraper.muteVideoEverybody();
+    function muteVideoEveryBody(spaceUser: SpaceUserExtended) {
+        analyticsClient.muteVideoEverybodyMeetingAction();
+        spaceUser.space.emitPublicMessage({
+            $case: "muteVideoForEverybody",
+            muteVideoForEverybody: {},
+        });
+        close();
     }
 
     /**
      * TODO: implement ban user
      */
     /*function ban() {
-        trackStreamWraper.ban();
+        trackStreamWrapper.ban();
     }*/
 
-    function kickoff() {
-        trackStreamWraper.kickoff();
+    function kickoff(spaceUser: SpaceUserExtended) {
+        analyticsClient.kickoffMeetingAction();
+        spaceUser.emitPrivateEvent({
+            $case: "kickOffUser",
+            kickOffUser: {},
+        });
+        // FIXME: this works only in bubbles
+        peerStore.removePeer(spaceUser.id);
+        close();
     }
 
     function pin() {
-        if (!videoEnabled) return;
-        highlightedEmbedScreen.toggleHighlight(embedScreen);
-        embedScreenLayoutStore.set(LayoutMode.Presentation);
+        analyticsClient.pinMeetingAction();
+        if (videoEnabled) {
+            highlightedEmbedScreen.toggleHighlight(embedScreen);
+            embedScreenLayoutStore.set(LayoutMode.Presentation);
+        }
+        close();
     }
 
-    function sendPrivateMessage() {
+    /*function sendPrivateMessage() {
         console.info("Not implemented yet");
-    }
+    }*/
 
     function toggleActionMenu(value: boolean) {
-        console.log("value", value, $moreActionOpened, !$moreActionOpened);
-        moreActionOpened.set(value);
+        moreActionOpened = value;
     }
 
-    function openBlockOrReportPopup() {
-        trackStreamWraper.blockOrReportUser();
+    function openBlockOrReportPopup(spaceUser: SpaceUserExtended) {
+        analyticsClient.reportMeetingAction();
+        showReportScreenStore.set({ userId: spaceUser.id, userName: spaceUser.name });
+        close();
+    }
+
+    function visitCard(spaceUser: SpaceUserExtended) {
+        analyticsClient.sendPrivateMessageMeetingAction();
+        requestVisitCardsStore.set(spaceUser.visitCardUrl ?? null);
+        close();
+    }
+
+    function close() {
+        dispatch("close");
     }
 </script>
 
-<!-- svelte-ignore a11y-click-events-have-key-events -->
 <div
-    class="tw-absolute tw-top-0 tw-left-0 tw-flex tw-flex-col tw-flex-wrap tw-justify-between tw-items-center tw-p-1 tw-bg-black tw-bg-opacity-10 tw-rounded-lg tw-max-h-full tw-z-50 hover:tw-bg-opacity-90 tw-cursor-pointer"
-    class:tw-mt-[0.2rem]={!videoEnabled}
+    class="flex flex-col p-1 w-48 bg-contrast/80 backdrop-blur-md bg-opacity-10 rounded-md max-h-max z-50 cursor-pointer"
+    class:mt-[0.2rem]={!videoEnabled}
     on:click={() => analyticsClient.moreActionMetting()}
-    on:click|preventDefault|stopPropagation={() => toggleActionMenu(!get(moreActionOpened))}
-    on:mouseleave={() => toggleActionMenu(false)}
+    on:click|preventDefault|stopPropagation={() => toggleActionMenu(!moreActionOpened)}
+    role="button"
+    tabindex="0"
+    on:keydown={() => toggleActionMenu(!moreActionOpened)}
+    on:mouseleave={() => close()}
 >
-    {#if !$moreActionOpened}
-        <!-- More action -->
+    <!-- Pin -->
+    {#if videoEnabled}
         <button
-            id="more-action"
-            class="action-button tw-flex tw-flex-row tw-items-center tw-justify-center tw-p-0 tw-mx-1 tw-cursor-pointer"
+            class="action-button flex gap-2 items-center hover:bg-white/10 m-0 p-2 w-full text-sm rounded leading-4 text-left"
+            on:click|preventDefault|stopPropagation={() => pin()}
         >
-            <img src={MoreActionSvg} class="tw-w-4 tw-h-4" alt="Ellipsis icon" />
+            <img src={PinSvg} class="w-4 h-4" alt="" />
+            {$LL.camera.menu.pin()}
         </button>
-    {:else}
-        <!-- Less action -->
-        <button
-            id="less-action"
-            class="action-button tw-flex tw-flex-row tw-items-center tw-justify-center tw-p-0 tw-mx-1 tw-cursor-pointer"
-        >
-            <img src={MoreActionSvg} class="tw-w-4 tw-h-4 tw-rotate-90" alt="Ellipsis icon" />
-            <Tooltip text={$LL.camera.menu.closeMenu()} leftPosition="true" />
-        </button>
-
-        <!-- Pin -->
-        {#if videoEnabled}
-            <button
-                id="pin"
-                class="action-button tw-flex tw-flex-row tw-items-center tw-justify-center tw-p-0 tw-mx-1 tw-cursor-pointer"
-                on:click={() => analyticsClient.pinMeetingAction()}
-                on:click|preventDefault|stopPropagation={() => pin()}
-            >
-                <img src={PinSvg} class="tw-w-4 tw-h-4" alt="Ellipsis icon" />
-                <Tooltip text={$LL.camera.menu.pin()} leftPosition="true" />
-            </button>
-        {/if}
-
-        <!-- Mute audio user -->
-        <button
-            id="mute-audio-user"
-            class="action-button tw-flex tw-flex-row tw-items-center tw-justify-center tw-p-0 tw-mx-1 tw-cursor-pointer"
-            on:click={() => analyticsClient.muteMicrophoneMeetingAction()}
-            on:click|preventDefault|stopPropagation={() => muteAudio()}
-        >
-            <img src={MicrophoneCloseSvg} class="tw-w-4 tw-h-4" alt="Ellipsis icon" />
-            <Tooltip text={$LL.camera.menu.muteAudioUser()} leftPosition="true" />
-        </button>
-
-        <!-- Mute audio every body -->
-        {#if $userIsAdminStore}
-            <button
-                id="mute-audio-everybody"
-                class="action-button tw-flex tw-flex-row tw-items-center tw-justify-center tw-p-0 tw-mx-1 tw-cursor-pointer"
-                on:click={() => analyticsClient.muteMicrophoneEverybodyMeetingAction()}
-                on:click|preventDefault|stopPropagation={() => muteAudioEveryBody()}
-            >
-                <img src={MicrophoneCloseSvg} class="tw-w-4 tw-h-4" alt="Ellipsis icon" />
-                <Tooltip text={$LL.camera.menu.muteAudioEveryBody()} leftPosition="true" />
-            </button>
-        {/if}
-
-        <!-- Mute video -->
-        <button
-            id="mute-video-user"
-            class="action-button tw-flex tw-flex-row tw-items-center tw-justify-center tw-p-0 tw-mx-1 tw-cursor-pointer"
-            on:click={() => analyticsClient.muteVideoMeetingAction()}
-            on:click|preventDefault|stopPropagation={() => muteVideo()}
-        >
-            <img src={NoVideoSvg} class="tw-w-4 tw-h-4" alt="Ellipsis icon" />
-            <Tooltip text={$LL.camera.menu.muteVideoUser()} leftPosition="true" />
-        </button>
-
-        <!-- Mute video every body -->
-        {#if $userIsAdminStore}
-            <button
-                id="mute-video-everybody"
-                class="action-button tw-flex tw-flex-row tw-items-center tw-justify-center tw-p-0 tw-mx-1 tw-cursor-pointer"
-                on:click={() => analyticsClient.muteVideoEverybodyMeetingAction()}
-                on:click|preventDefault|stopPropagation={() => muteVideoEveryBody()}
-            >
-                <img src={NoVideoSvg} class="tw-w-4 tw-h-4" alt="Ellipsis icon" />
-                <Tooltip text={$LL.camera.menu.muteVideoEveryBody()} leftPosition="true" />
-            </button>
-        {/if}
-
-        <!-- Kickoff user -->
-        {#if $userIsAdminStore}
-            <button
-                id="kickoff-user"
-                class="action-button tw-flex tw-flex-row tw-items-center tw-justify-center tw-p-0 tw-mx-1 tw-cursor-pointer"
-                on:click={() => analyticsClient.kickoffMeetingAction()}
-                on:click|preventDefault|stopPropagation={() => kickoff()}
-            >
-                <img src={banUserSvg} class="tw-w-4 tw-h-4" alt="Ellipsis icon" />
-                <Tooltip text={$LL.camera.menu.kickoffUser()} leftPosition="true" />
-            </button>
-        {/if}
-
-        <!-- Send private message -->
-        <button
-            id="send-private-message"
-            class="action-button tw-flex tw-flex-row tw-items-center tw-justify-center tw-p-0 tw-mx-1 tw-cursor-pointer"
-            on:click={() => analyticsClient.sendPrivateMessageMeetingAction()}
-            on:click|preventDefault|stopPropagation={() => sendPrivateMessage()}
-        >
-            <img src={BubbleTalkPng} class="tw-w-4 tw-h-4" alt="Ellipsis icon" />
-            <Tooltip text={$LL.camera.menu.senPrivateMessage()} leftPosition="true" />
-        </button>
-
-        <!-- Block or report user -->
-        {#if trackStreamWraper instanceof VideoPeer}
-            <button
-                id="block-or-report-user"
-                class="action-button tw-flex tw-flex-row tw-items-center tw-justify-center tw-p-0 tw-mx-1 tw-cursor-pointer"
-                on:click={() => analyticsClient.reportMeetingAction()}
-                on:click|preventDefault|stopPropagation={() => openBlockOrReportPopup()}
-            >
-                <img src={reportImg} class="tw-w-4 tw-h-4" alt="Ellipsis icon" />
-                <Tooltip text={$LL.camera.menu.blockOrReportUser()} leftPosition="true" />
-            </button>
-        {/if}
     {/if}
+
+    <!-- Mute audio user -->
+    <button
+        class="action-button mute-audio-user flex gap-2 items-center hover:bg-white/10 m-0 p-2 w-full text-sm rounded leading-4 text-left"
+        on:click|preventDefault|stopPropagation={() => muteAudio(spaceUser)}
+    >
+        <img src={MicrophoneCloseSvg} class="w-4 h-4" alt="" />
+        {$LL.camera.menu.muteAudioUser()}
+    </button>
+
+    <!-- Mute audio every body -->
+    {#if $userIsAdminStore}
+        <button
+            class="action-button flex gap-2 items-center hover:bg-white/10 m-0 p-2 w-full text-sm rounded leading-4 text-left"
+            on:click|preventDefault|stopPropagation={() => muteAudioEveryBody(spaceUser)}
+        >
+            <img src={MicrophoneCloseSvg} class="w-4 h-4" alt="" />
+            {$LL.camera.menu.muteAudioEveryBody()}
+        </button>
+    {/if}
+
+    <!-- Mute video -->
+    <button
+        id="mute-video-user"
+        class="action-button flex gap-2 items-center hover:bg-white/10 m-0 p-2 w-full text-sm rounded leading-4 text-left"
+        on:click|preventDefault|stopPropagation={() => muteVideo(spaceUser)}
+    >
+        <img src={NoVideoSvg} class="w-4 h-4" alt="" />
+        {$LL.camera.menu.muteVideoUser()}
+    </button>
+
+    <!-- Mute video every body -->
+    {#if $userIsAdminStore}
+        <button
+            class="action-button flex gap-2 items-center hover:bg-white/10 m-0 p-2 w-full text-sm rounded leading-4 text-left"
+            on:click|preventDefault|stopPropagation={() => muteVideoEveryBody(spaceUser)}
+        >
+            <img src={NoVideoSvg} class="w-4 h-4" alt="" />
+            {$LL.camera.menu.muteVideoEveryBody()}
+        </button>
+    {/if}
+
+    <!-- Kickoff user -->
+    {#if $userIsAdminStore}
+        <button
+            id="kickoff-user"
+            class="action-button flex gap-2 items-center hover:bg-white/10 m-0 p-2 w-full text-sm rounded leading-4 text-left"
+            on:click|preventDefault|stopPropagation={() => kickoff(spaceUser)}
+        >
+            <img src={banUserSvg} class="w-4 h-4" alt="" />
+            {$LL.camera.menu.kickoffUser()}
+        </button>
+    {/if}
+
+    <!-- Send private message -->
+    <!--    <button-->
+    <!--        class="action-button flex flex-row items-center justify-center p-0 mx-1 cursor-pointer"-->
+    <!--        on:click={() => analyticsClient.sendPrivateMessageMeetingAction()}-->
+    <!--        on:click|preventDefault|stopPropagation={() => sendPrivateMessage()}-->
+    <!--    >-->
+    <!--        <img src={BubbleTalkPng} class="w-8 h-8" alt="" />-->
+    <!--        <Tooltip text={$LL.camera.menu.senPrivateMessage()} rightPosition="true" />-->
+    <!--    </button>-->
+
+    <!-- Show visit card-->
+    {#if spaceUser.visitCardUrl}
+        <button
+            class="action-button flex gap-2 items-center hover:bg-white/10 m-0 p-2 w-full text-sm rounded leading-4 text-left"
+            on:click={() => analyticsClient.sendPrivateMessageMeetingAction()}
+            on:click={() => close()}
+            on:click|preventDefault|stopPropagation={() => visitCard(spaceUser)}
+        >
+            <IconUser />
+            {$LL.chat.menu.visitCard()}
+        </button>
+    {/if}
+    <!-- Block or report user -->
+    <button
+        class="action-button flex gap-2 items-center hover:bg-white/10 m-0 p-2 w-full text-sm rounded leading-4 text-left"
+        on:click|preventDefault|stopPropagation={() => openBlockOrReportPopup(spaceUser)}
+    >
+        <IconAlertTriangle />
+        {$LL.camera.menu.blockOrReportUser()}
+    </button>
 </div>
 
 <style lang="scss">
-    .action-button {
-        transition: all 0.2s;
-        &:hover {
-            --tw-bg-opacity: 1;
-            opacity: 1;
-            transform: scale(1.2);
-        }
-    }
 </style>

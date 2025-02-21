@@ -12,18 +12,14 @@ const menu: DeepPartial<Translation["menu"]> = {
             userlist: "wužiwarska lisćina",
             openEmoji: "wuzwoleny emojijowy popup wočinić",
             closeEmoji: "emoji-meni zawrěć",
+            mobile: "mobilny meni wočinić",
+            calendar: "kalender wočinić",
         },
     },
     visitCard: {
         close: "zawrěć",
     },
     profile: {
-        edit: {
-            name: "twoje mjeno změnić",
-            woka: "twoje WOKA změnić",
-            companion: "twojeho přewodźerja změnić",
-            camera: "nastajenja kamery změnić",
-        },
         login: "přizjewić",
         logout: "wotzjewić",
     },
@@ -104,7 +100,6 @@ const menu: DeepPartial<Translation["menu"]> = {
         },
     },
     sub: {
-        profile: "profil",
         settings: "nastajenja",
         invite: "přeprošenje",
         credit: "wo karće",

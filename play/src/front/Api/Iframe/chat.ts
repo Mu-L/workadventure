@@ -5,6 +5,7 @@ import { IframeApiContribution, sendToWorkadventure } from "./IframeApiContribut
 import { apiCallback } from "./registeredCallbacks";
 import { RemotePlayerInterface } from "./Players/RemotePlayer";
 import players from "./players";
+import { PublicPlayerState } from "./PublicPlayerState";
 
 const chatStream = new Subject<UserInputChatEvent>();
 
@@ -12,7 +13,9 @@ export interface OnChatMessageOptions {
     scope: "local" | "bubble";
 }
 
-export class WorkadventureChatCommands extends IframeApiContribution<WorkadventureChatCommands> {
+export class WorkadventureChatCommands<PublicState extends { [key: string]: unknown }> extends IframeApiContribution<
+    WorkadventureChatCommands<PublicState>
+> {
     callbacks = [
         apiCallback({
             callback: (event: UserInputChatEvent) => {
@@ -24,7 +27,7 @@ export class WorkadventureChatCommands extends IframeApiContribution<Workadventu
 
     /**
      * Open instantly the chat window.
-     * {@link https://workadventu.re/map-building/api-chat.md#open-the-chat-window | Website documentation}
+     * {@link https://docs.workadventu.re/map-building/api-chat.md#open-the-chat-window | Website documentation}
      */
     open(): void {
         sendToWorkadventure({ type: "openChat", data: undefined });
@@ -32,7 +35,7 @@ export class WorkadventureChatCommands extends IframeApiContribution<Workadventu
 
     /**
      * Close instantly the chat window.
-     * {@link https://workadventu.re/map-building/api-chat.md#close-the-chat-window | Website documentation}
+     * {@link https://docs.workadventu.re/map-building/api-chat.md#close-the-chat-window | Website documentation}
      */
     close(): void {
         sendToWorkadventure({ type: "closeChat", data: undefined });
@@ -115,7 +118,7 @@ export class WorkadventureChatCommands extends IframeApiContribution<Workadventu
 
     /**
      * Listens to messages typed in the chat history.
-     * {@link https://workadventu.re/map-building/api-chat.md#listening-to-messages-from-the-chat | Website documentation}
+     * {@link https://docs.workadventu.re/map-building/api-chat.md#listening-to-messages-from-the-chat | Website documentation}
      *
      * @param {function(message: string, event: { authorId: number|undefined, user: RemotePlayerInterface|undefined }): void} callback Function that will be called when a message is received. It contains the message typed by the user
      * @param {OnChatMessageOptions} options Options to decide if we listen only to messages from the local user (default) or from all users in the bubble.
@@ -131,7 +134,10 @@ export class WorkadventureChatCommands extends IframeApiContribution<Workadventu
         const finalOptions = options ?? { scope: "local" };
 
         return chatStream.subscribe((event) => {
-            if (finalOptions.scope === "local" && event.senderId !== undefined) {
+            if (
+                (finalOptions.scope === "local" && event.senderId !== undefined) ||
+                (finalOptions.scope === "bubble" && event.senderId === undefined)
+            ) {
                 return;
             }
             callback(event.message, {
@@ -142,4 +148,4 @@ export class WorkadventureChatCommands extends IframeApiContribution<Workadventu
     }
 }
 
-export default new WorkadventureChatCommands();
+export default new WorkadventureChatCommands<PublicPlayerState>();
